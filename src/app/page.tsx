@@ -6,7 +6,7 @@ import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
 export const dynamic = "force-dynamic";
 
 export default async function Page() {
-  const token = cookies().get(SESSION_COOKIE)?.value;
+  const token = (await cookies()).get(SESSION_COOKIE)?.value;
   const authed = await verifySessionToken(token);
 
   if (!authed) {
