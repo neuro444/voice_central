@@ -6,6 +6,7 @@ import DashboardScreen from "./DashboardScreen";
 import { AnalyticsScreen, MenuScreen } from "./ReferenceScreens";
 const API = process.env.NEXT_PUBLIC_API_URL!;
 const TELEPHONY_API = process.env.NEXT_PUBLIC_TELEPHONY_URL!;
+const CHAT_MANAGER_API = process.env.NEXT_PUBLIC_API_URL!; // chat_manager, despite the generic name
 // Print service base URL. Set NEXT_PUBLIC_PRINT_API_URL to switch targets
 // (https://cakeworld.neuroheart.ai on the VPS, http://localhost:7860 locally).
 // If unset, fall back to same-origin so the button posts to /print/order on
@@ -14,7 +15,7 @@ const PRINT_API = process.env.NEXT_PUBLIC_PRINT_API_URL ?? "";
 const WS  = API.replace("http", "ws") + "/api/ws";
 
 interface Conversation {
-  id: number;
+  id: string;
   phone: string;
   name: string;
   intent: string;
@@ -49,7 +50,7 @@ function ChannelBadge({ channel, runtime }: { channel?: string; runtime?: string
 }
 
 interface Message {
-  id: number;
+  id: string;
   direction: "inbound" | "outbound";
   body: string;
   media_type: string;
@@ -450,16 +451,78 @@ export default function Home() {
   }
 
   // Load initial data
+interface ChatManagerCaller {
+  user_id: string;
+  name: string;
+  last_active: string;
+}
+
+interface ChatManagerSession {
+  session_id: string;
+  title: string;
+  message_count: number;
+  updated_at: string;
+  running_summary: string | null;
+}
+
+interface ChatManagerMessage {
+  seq: number;
+  role: string;
+  content: string;
+  created_at: string;
+}
+
+// One chat_manager session (+ its caller) -> one Conversation. state is
+// always "done": phone sessions are historical transcripts, never a live
+// thread needing staff takeover (that is a WhatsApp-only/Evolution API
+// concept this does not touch -- Enter Chat/End Session correctly never
+// show for phone conversations because of this).
+function mapSessionToConversation(session: ChatManagerSession, caller: ChatManagerCaller): Conversation {
+  return {
+    id: session.session_id,
+    phone: caller.user_id,
+    name: caller.name || "Unknown",
+    intent: "",
+    state: "done",
+    channel: "phone",
+    last_message: session.running_summary || session.title || "",
+    last_message_at: session.updated_at,
+  };
+}
+
+function mapChatManagerMessage(m: ChatManagerMessage): Message {
+  return {
+    id: String(m.seq),
+    direction: m.role === "user" ? "inbound" : "outbound",
+    body: m.content,
+    media_type: "text",
+    created_at: m.created_at,
+  };
+}
+
   async function loadConversations() {
+    // Phone conversations come from chat_manager's real /callers + /sessions.
+    // WhatsApp still points at the old dead endpoint -- a pre-existing gap,
+    // not something this pass fixes, so it stays empty rather than faked.
     try {
-      const r = await fetch(`${API}/api/conversations`);
-      if (r.ok) {
-        const data = await r.json();
-        setConversations(data);
-        setSelectedConv((current) =>
-          current ? data.find((c: Conversation) => c.id === current.id) || current : current
-        );
-      }
+      const callersRes = await fetch(`${CHAT_MANAGER_API}/callers`);
+      if (!callersRes.ok) return;
+      const callers: ChatManagerCaller[] = await callersRes.json();
+      const sessionLists = await Promise.all(
+        callers.map((caller) =>
+          fetch(`${CHAT_MANAGER_API}/sessions?user_id=${encodeURIComponent(caller.user_id)}`)
+            .then((r) => (r.ok ? r.json() : []))
+            .then((sessions: ChatManagerSession[]) =>
+              sessions.map((s) => mapSessionToConversation(s, caller))
+            )
+            .catch(() => [])
+        )
+      );
+      const data = sessionLists.flat();
+      setConversations(data);
+      setSelectedConv((current) =>
+        current ? data.find((c: Conversation) => c.id === current.id) || current : current
+      );
     } catch { /* retain last successful data during outages */ }
   }
   async function loadApprovals() {
@@ -468,10 +531,13 @@ export default function Home() {
       if (r.ok) setApprovals(await r.json());
     } catch { /* retain last successful data during outages */ }
   }
-  async function loadMessages(convId: number) {
+  async function loadMessages(convId: string) {
     try {
-      const r = await fetch(`${API}/api/conversations/${convId}/messages`);
-      if (r.ok) setMessages(await r.json());
+      const r = await fetch(`${CHAT_MANAGER_API}/sessions/${convId}/messages`);
+      if (r.ok) {
+        const raw: ChatManagerMessage[] = await r.json();
+        setMessages(raw.map(mapChatManagerMessage));
+      }
     } catch { /* retain last successful data during outages */ }
   }
   async function loadStatus() {

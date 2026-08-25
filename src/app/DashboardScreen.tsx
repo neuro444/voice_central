@@ -29,7 +29,7 @@ interface DashboardApproval {
   final_total: number | null;
 }
 interface DashboardConversation {
-  id: number;
+  id: string;
   name: string;
   phone: string;
   channel?: string;

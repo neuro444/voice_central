@@ -5,7 +5,7 @@ import type { ReactNode, RefObject } from "react";
 export type ConversationChannel = "phone" | "whatsapp";
 
 export interface ConversationRecord {
-  id: number;
+  id: string;
   phone: string;
   name: string;
   intent: string;
@@ -16,7 +16,7 @@ export interface ConversationRecord {
 }
 
 export interface ConversationMessage {
-  id: number;
+  id: string;
   direction: "inbound" | "outbound";
   body: string;
   media_type: string;
