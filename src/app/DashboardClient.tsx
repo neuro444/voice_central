@@ -1,4 +1,5 @@
 "use client";
+import Image from "next/image";
 import { useState, useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 import ConversationsScreen from "./ConversationsScreen";
@@ -799,8 +800,14 @@ function mapChatManagerMessage(m: ChatManagerMessage): Message {
       {/* Sidebar */}
       <aside className="sidebar dashboard-sidebar">
         <button type="button" className="cake-world-logo" onClick={() => setTab("dashboard")}>
-          <span className="cake-world-logo-mark">CW</span>
-          <span className="cake-world-logo-copy"><strong>{restaurant?.name || "Restaurant"}</strong></span>
+          <Image
+            className="cake-world-logo-image"
+            src="/cake-world-logo.jpg"
+            alt="Cake World Eatery"
+            width={512}
+            height={260}
+            sizes="(max-width: 760px) 138px, 184px"
+          />
         </button>
         <nav className="sidebar-nav primary-sidebar-nav">
           <a
@@ -894,7 +901,7 @@ function mapChatManagerMessage(m: ChatManagerMessage): Message {
                 {tab === "kanban" && "Move catering work through each stage of delivery."}
                 {tab === "menu" && "What the AI assistant knows and quotes — powered by the live menu."}
                 {tab === "analytics" && "Track your restaurant's performance and AI assistant efficiency."}
-                {tab === "settings" && "Manage your restaurant profile, AI assistant, and integrations."}
+                {tab === "settings" && "View the restaurant profile used by the dashboard."}
               </p>
               </div>
             )}
@@ -996,23 +1003,7 @@ function mapChatManagerMessage(m: ChatManagerMessage): Message {
         {tab === "customers" && <CustomersTab api={API} />}
         {tab === "menu" && <MenuScreen api={API} />}
         {tab === "analytics" && <AnalyticsScreen api={API} refreshKey={operationsRefreshKey} />}
-        {tab === "settings" && (
-          <SettingsTab
-            statusLoaded={statusLoaded}
-            autoRepliesEnabled={autoRepliesEnabled}
-            automationSaving={automationSaving}
-            whatsappConnected={whatsappConnected}
-            whatsappSaving={whatsappSaving}
-            mockupStatusLoaded={mockupStatusLoaded}
-            mockupsSeeded={mockupsSeeded}
-            mockupsBusy={mockupsBusy}
-            restaurant={restaurant}
-            onToggleAutomation={toggleAutomation}
-            onToggleWhatsapp={toggleWhatsapp}
-            onSeedMockups={seedMockups}
-            onClearMockups={clearMockups}
-          />
-        )}
+        {tab === "settings" && <SettingsTab restaurant={restaurant} />}
       </main>
 
       {toast && <Toast msg={toast} />}
@@ -1062,140 +1053,19 @@ function UnavailableFeatureScreen({
   );
 }
 
-function SettingsTab({
-  statusLoaded,
-  autoRepliesEnabled,
-  automationSaving,
-  whatsappConnected,
-  whatsappSaving,
-  mockupStatusLoaded,
-  mockupsSeeded,
-  mockupsBusy,
-  onToggleAutomation,
-  onToggleWhatsapp,
-  onSeedMockups,
-  onClearMockups,
-  restaurant,
-}: {
-  statusLoaded: boolean;
-  autoRepliesEnabled: boolean;
-  automationSaving: boolean;
-  whatsappConnected: boolean;
-  whatsappSaving: boolean;
-  mockupStatusLoaded: boolean;
-  mockupsSeeded: boolean;
-  mockupsBusy: boolean;
-  onToggleAutomation: () => void;
-  onToggleWhatsapp: () => void;
-  onSeedMockups: () => void;
-  onClearMockups: () => void;
-  restaurant: StatusResponse["restaurant"];
-}) {
+function SettingsTab({ restaurant }: { restaurant: StatusResponse["restaurant"] }) {
   return (
-    <div className="content feature-content settings-content">
-      <aside className="settings-local-nav">
-        <strong>▣ &nbsp; General</strong>
-        <span>✦ &nbsp; AI Assistant</span>
-        <span>↻ &nbsp; Menu Sync</span>
-        <span>♧ &nbsp; Notifications</span>
-        <span>♙ &nbsp; Team</span>
-      </aside>
-      <div className="settings-main-column">
-        <section className="settings-profile-card">
-          <h2>ⓘ &nbsp; Restaurant Profile</h2>
-          {restaurant ? (
-            <div className="settings-profile-grid">
-              <label>Restaurant Name<strong>{restaurant.name || "—"}</strong></label>
-              <label>Phone Number<strong>{restaurant.phone || "—"}</strong></label>
-              <label className="wide">Address<strong>{[restaurant.address, restaurant.city, restaurant.state].filter(Boolean).join(", ") || "—"}</strong></label>
-            </div>
-          ) : <div className="reference-empty compact"><strong>No restaurant profile available</strong><span>The backend did not return restaurant settings.</span></div>}
-          <span className="placeholder-label">Profile editing unavailable</span>
-        </section>
-        <h2 className="settings-section-heading">Connected services</h2>
-        <div className="settings-grid">
-        <section className="settings-card">
-          <div className="settings-card-heading">
-            <span className="settings-card-icon whatsapp" aria-hidden="true">◌</span>
-            <div>
-              <h3>WhatsApp connection</h3>
-              <p>Connect or disconnect the configured Evolution instance.</p>
-            </div>
+    <div className="content feature-content settings-content settings-profile-only">
+      <section className="settings-profile-card">
+        <h2>ⓘ &nbsp; Restaurant Profile</h2>
+        {restaurant ? (
+          <div className="settings-profile-grid">
+            <label>Restaurant Name<strong>{restaurant.name || "—"}</strong></label>
+            <label>Phone Number<strong>{restaurant.phone || "—"}</strong></label>
+            <label className="wide">Address<strong>{[restaurant.address, restaurant.city, restaurant.state].filter(Boolean).join(", ") || "—"}</strong></label>
           </div>
-          <div className="settings-card-footer">
-            <span className={`settings-status ${!statusLoaded ? "neutral" : whatsappConnected ? "connected" : "disconnected"}`}>
-              <i />{!statusLoaded ? "Status unavailable" : whatsappConnected ? "Connected" : "Disconnected"}
-            </span>
-            <button
-              type="button"
-              className="btn btn-outline"
-              onClick={onToggleWhatsapp}
-              disabled={!statusLoaded || whatsappSaving}
-            >
-              {whatsappSaving ? "Updating…" : whatsappConnected ? "Disconnect" : "Connect"}
-            </button>
-          </div>
-        </section>
-
-        <section className="settings-card">
-          <div className="settings-card-heading">
-            <span className="settings-card-icon automation" aria-hidden="true">✦</span>
-            <div>
-              <h3>AI auto-replies</h3>
-              <p>Pause or resume automated replies through the existing automation API.</p>
-            </div>
-          </div>
-          <div className="settings-card-footer">
-            <span className={`settings-status ${!statusLoaded ? "neutral" : autoRepliesEnabled ? "connected" : "disconnected"}`}>
-              <i />{!statusLoaded ? "Status unavailable" : autoRepliesEnabled ? "Enabled" : "Paused"}
-            </span>
-            <button
-              type="button"
-              className={`toggle-switch ${autoRepliesEnabled ? "on" : "off"}`}
-              onClick={onToggleAutomation}
-              disabled={!statusLoaded || automationSaving}
-              role="switch"
-              aria-checked={autoRepliesEnabled}
-              aria-label="Toggle AI auto-replies"
-            >
-              <span className="toggle-thumb" />
-            </button>
-          </div>
-        </section>
-
-        <section className="settings-card">
-          <div className="settings-card-heading">
-            <span className="settings-card-icon demo" aria-hidden="true">◇</span>
-            <div>
-              <h3>Demo data</h3>
-              <p>Load or clear the existing dashboard mockup dataset. Real orders are not removed.</p>
-            </div>
-          </div>
-          <div className="settings-card-footer">
-            <span className={`settings-status ${mockupStatusLoaded && mockupsSeeded ? "connected" : "neutral"}`}>
-              <i />{!mockupStatusLoaded ? "Status unavailable" : mockupsSeeded ? "Demo data loaded" : "Demo data not loaded"}
-            </span>
-            {mockupsSeeded ? (
-              <button type="button" className="btn btn-outline" onClick={onClearMockups} disabled={!mockupStatusLoaded || mockupsBusy}>
-                {mockupsBusy ? "Clearing…" : "Clear demo data"}
-              </button>
-            ) : (
-              <button type="button" className="btn btn-outline" onClick={onSeedMockups} disabled={!mockupStatusLoaded || mockupsBusy}>
-                {mockupsBusy ? "Loading…" : "Load demo data"}
-              </button>
-            )}
-          </div>
-        </section>
-      </div>
-
-      <div className="settings-placeholder-note">
-        <span className="placeholder-label">UI placeholder</span>
-        <div>
-          <strong>Restaurant profile and notification preferences</strong>
-          <p>No dashboard API exists for these settings yet, so they are intentionally unavailable.</p>
-        </div>
-      </div>
-      </div>
+        ) : <div className="reference-empty compact"><strong>No restaurant profile available</strong><span>The backend did not return restaurant settings.</span></div>}
+      </section>
     </div>
   );
 }

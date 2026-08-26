@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
@@ -38,11 +39,15 @@ function LoginFormInner() {
     <div className="login-page">
       <form className="login-card" onSubmit={onSubmit} noValidate>
         <div className="login-brand">
-          <span className="cake-world-logo-mark">CW</span>
-          <div>
-            <strong>Cake World</strong>
-            <small>Staff Dashboard</small>
-          </div>
+          <Image
+            className="cake-world-logo-image"
+            src="/cake-world-logo.jpg"
+            alt="Cake World Eatery"
+            width={512}
+            height={260}
+            sizes="(max-width: 428px) calc(100vw - 100px), 260px"
+            priority
+          />
         </div>
         <h1>Sign in</h1>
         <p className="login-sub">Enter your administrator credentials to continue.</p>
