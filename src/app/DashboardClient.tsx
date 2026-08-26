@@ -6,8 +6,8 @@ import ConversationsScreen from "./ConversationsScreen";
 import DashboardScreen from "./DashboardScreen";
 import { AnalyticsScreen, MenuScreen } from "./ReferenceScreens";
 const API = process.env.NEXT_PUBLIC_API_URL!;
-const TELEPHONY_API = process.env.NEXT_PUBLIC_TELEPHONY_URL!;
-const CHAT_MANAGER_API = process.env.NEXT_PUBLIC_API_URL!; // chat_manager, despite the generic name
+const TELEPHONY_API = "/api/telephony";
+const CHAT_MANAGER_API = "/api/chat-manager";
 // Print service base URL. Set NEXT_PUBLIC_PRINT_API_URL to switch targets
 // (https://cakeworld.neuroheart.ai on the VPS, http://localhost:7860 locally).
 // If unset, fall back to same-origin so the button posts to /print/order on
