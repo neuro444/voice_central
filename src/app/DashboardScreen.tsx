@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import MetricsRow from "./MetricsRow";
 
 interface DashboardOrder {
-  id: number;
+  id: string;
   customer_name: string;
   customer_phone: string;
   channel?: string;
@@ -16,6 +16,22 @@ interface DashboardOrder {
   status: "received" | "preparing" | "ready" | "picked_up";
   approval_pending?: boolean;
   created_at: string;
+}
+
+interface CompletedOrderRecord {
+  emitted_at: string;
+  call_uuid: string;
+  user_id: string;
+  session_id: string | null;
+  name?: string;
+  channel?: string;
+  order: {
+    customer_name?: string;
+    items?: Array<{ name?: string; quantity?: number }>;
+    subtotal?: string | number;
+    tax?: string | number;
+    total?: string | number;
+  } | null;
 }
 
 interface DashboardApproval {
@@ -145,6 +161,8 @@ function QueueColumn({
 
 export default function DashboardScreen({
   api,
+  telephonyApi,
+  chatManagerApi,
   refreshKey,
   accountMenu,
   onOpenApprovals,
@@ -153,6 +171,8 @@ export default function DashboardScreen({
   onOpenConversations,
 }: {
   api: string;
+  telephonyApi: string;
+  chatManagerApi: string;
   refreshKey: number;
   accountMenu: ReactNode;
   onOpenApprovals: () => void;
@@ -167,12 +187,48 @@ export default function DashboardScreen({
     let active = true;
     async function loadDashboardData() {
       try {
-        const [ordersResponse, approvalsResponse] = await Promise.all([
-          fetch(`${api}/api/kitchen/orders`),
+        const [telephonyResponse, chatResponse, approvalsResponse] = await Promise.all([
+          fetch(`${telephonyApi}/orders/recent`),
+          fetch(`${chatManagerApi}/orders/recent`),
           fetch(`${api}/api/approvals`),
         ]);
         if (!active) return;
-        if (ordersResponse.ok) setOrders(await ordersResponse.json());
+        const telephonyData: { orders: CompletedOrderRecord[] } = telephonyResponse.ok
+          ? await telephonyResponse.json()
+          : { orders: [] };
+        const chatData: { orders: CompletedOrderRecord[] } = chatResponse.ok
+          ? await chatResponse.json()
+          : { orders: [] };
+        if (telephonyResponse.ok || chatResponse.ok) {
+          const phoneSessionIds = new Set(
+            telephonyData.orders.map((record) => record.session_id).filter(Boolean)
+          );
+          const merged = [
+            ...telephonyData.orders,
+            ...chatData.orders.filter((record) => !phoneSessionIds.has(record.session_id)),
+          ].sort((a, b) => b.emitted_at.localeCompare(a.emitted_at));
+          setOrders(merged.flatMap((record) => {
+            if (!record.order) return [];
+            const numberValue = (value: string | number | undefined) => {
+              if (value == null || value === "") return null;
+              const parsed = typeof value === "number" ? value : Number.parseFloat(value);
+              return Number.isNaN(parsed) ? null : parsed;
+            };
+            return [{
+              id: record.call_uuid,
+              customer_name: record.order.customer_name || record.name || "Unknown",
+              customer_phone: record.user_id || "",
+              channel: record.channel || "phone",
+              items: record.order.items || [],
+              estimated_total: numberValue(record.order.total),
+              subtotal: numberValue(record.order.subtotal),
+              tax: numberValue(record.order.tax),
+              status: "received" as const,
+              approval_pending: false,
+              created_at: record.emitted_at,
+            }];
+          }));
+        }
         if (approvalsResponse.ok) setApprovals(await approvalsResponse.json());
       } catch {
         // Preserve the last successful view while the backend is temporarily unavailable.
@@ -181,7 +237,7 @@ export default function DashboardScreen({
     void loadDashboardData();
     const interval = window.setInterval(loadDashboardData, 10000);
     return () => { active = false; window.clearInterval(interval); };
-  }, [api, refreshKey]);
+  }, [api, telephonyApi, chatManagerApi, refreshKey]);
 
   const needsApproval = approvals.map((approval) => approvalCard(approval, onOpenApprovals));
   const approved = orders.filter((order) => order.status === "received" && !order.approval_pending).map(queueCard);

@@ -107,7 +107,7 @@ export function MenuScreen({ api }: { api: string }) {
   const [quantities, setQuantities] = useState<Record<string, string>>({});
   const [cateringSizes, setCateringSizes] = useState<Record<string, MenuPriceKey>>({});
   const [cakePreviews, setCakePreviews] = useState<Record<string, CakePreview>>({});
-  const [activeSource, setActiveSource] = useState<MenuSource>("catering");
+  const [activeSource] = useState<MenuSource>("takeaway");
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -118,7 +118,7 @@ export function MenuScreen({ api }: { api: string }) {
     setLoading(true);
     setError("");
     try {
-      const data = await requestJson<MenuResponse>(`${api}/api/menu`);
+      const data = await requestJson<MenuResponse>(`${api}/menu`);
       const nextOriginals: Record<string, string> = {};
       const nextMeta: Record<string, FieldMeta> = {};
       const nextQuantities: Record<string, string> = {};
@@ -172,7 +172,7 @@ export function MenuScreen({ api }: { api: string }) {
       setCateringSizes(nextCateringSizes);
       setCakePreviews(nextCakePreviews);
     } catch {
-      setError("The menu could not be loaded. Check the backend connection and try again.");
+      setError("The pickup menu could not be loaded from Chat Manager. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -300,14 +300,10 @@ export function MenuScreen({ api }: { api: string }) {
         <input
           type="text"
           inputMode="decimal"
+          readOnly
           aria-label={`${itemName} ${label || "price"}`}
           aria-invalid={!!validation}
           value={drafts[id]}
-          onChange={(event) => {
-            setDrafts((current) => ({ ...current, [id]: event.target.value }));
-            setError("");
-            setSuccess("");
-          }}
         />
         {changed && <i className="menu-dirty-dot" aria-label="Unsaved change" />}
         {validation && <small className="menu-price-error">{validation}</small>}
@@ -583,33 +579,21 @@ export function MenuScreen({ api }: { api: string }) {
   return (
     <div className="reference-page menu-reference-page catering-menu-page">
       <div className="menu-channel-tabs" aria-label="Menu type">
-        <button className={activeSource === "takeaway" ? "active" : ""} type="button" onClick={() => { setActiveSource("takeaway"); setQuery(""); }}>Pickup &amp; Takeaway ({menu.takeaway.item_count})</button>
-        <button className={activeSource === "catering" ? "active" : ""} type="button" onClick={() => { setActiveSource("catering"); setQuery(""); }}>Catering ({menu.catering.item_count})</button>
-        <button className={activeSource === "cakes" ? "active" : ""} type="button" onClick={() => { setActiveSource("cakes"); setQuery(""); }}>Cakes ({menu.cakes.flavor_count})</button>
+        <button className="active" type="button">Pickup &amp; Takeaway ({menu.takeaway.item_count})</button>
       </div>
       <div className="menu-action-row">
         <label className="reference-search"><span>⌕</span><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={searchLabel} /></label>
-        <button className="menu-add-button" type="button" disabled title="Adding menu items is not supported by the backend"><span>＋</span> Add Item · Unavailable</button>
       </div>
+      <div className="menu-state-message" role="note">Cake and catering requests are handled by the manager and are intentionally not listed as orderable menus.</div>
       {error && <div className="menu-state-message error" role="alert">{error}</div>}
       {success && <div className="menu-state-message success" role="status">{success}</div>}
       {loading
-        ? <div className="reference-empty"><strong>Loading all real menu sources…</strong></div>
-        : activeSource === "takeaway"
-          ? renderTakeaway()
-          : activeSource === "catering"
-            ? renderCatering()
-            : renderCakes()}
+        ? <div className="reference-empty"><strong>Loading the pickup menu…</strong></div>
+        : renderTakeaway()}
       <footer className="menu-unsaved-bar">
-        <span className="menu-change-count">{changedFields.length} unsaved {changedFields.length === 1 ? "change" : "changes"}</span>
-        <p className="menu-unsaved-copy">Changes will be visible to the AI Assistant immediately after syncing.</p>
+        <span className="menu-change-count">Read only</span>
+        <p className="menu-unsaved-copy">This is the pickup menu currently used by the AI assistant.</p>
         <span className="menu-loaded-count">{activeCount} loaded</span>
-        <div className="menu-unsaved-actions">
-          <button type="button" onClick={discard} disabled={!changedFields.length || saving}>Discard</button>
-          <button className="menu-save-button" type="button" onClick={() => void save()} disabled={!changedFields.length || invalidFields.length > 0 || invalidQuantities.length > 0 || saving}>
-            {saving ? "Saving…" : "↻  Save & Sync to Assistant"}
-          </button>
-        </div>
       </footer>
     </div>
   );

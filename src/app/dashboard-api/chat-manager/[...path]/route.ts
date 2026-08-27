@@ -9,6 +9,9 @@ const ALLOWED_ROUTES = [
   /^callers$/,
   /^sessions$/,
   /^sessions\/[A-Za-z0-9_-]+\/(?:messages|debug)$/,
+  /^orders\/recent$/,
+  /^menu$/,
+  /^crm\/customers$/,
 ];
 
 function allowed(path: string): boolean {

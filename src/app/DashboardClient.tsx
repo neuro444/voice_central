@@ -29,6 +29,7 @@ interface Conversation {
 // Source-channel badge, used across inbox / approvals / kitchen / pipeline.
 const CHANNEL_META: Record<string, { label: string; icon: string; cls: string }> = {
   phone:    { label: "Phone",    icon: "📞", cls: "chan-phone" },
+  chat:     { label: "Chat",     icon: "💬", cls: "chan-whatsapp" },
   whatsapp: { label: "WhatsApp", icon: "💬", cls: "chan-whatsapp" },
   sms:      { label: "SMS",      icon: "✉️", cls: "chan-sms" },
 };
@@ -125,7 +126,7 @@ interface KitchenOrder {
 }
 
 interface CrmCustomer {
-  id: number;
+  id: string;
   name: string;
   phone: string;
   orders: number;
@@ -135,7 +136,7 @@ interface CrmCustomer {
   address: string;
   history: Array<{
     type: string;
-    id: number;
+    id: string;
     status: string;
     occasion?: string;
     guest_count?: number;
@@ -464,6 +465,8 @@ interface ChatManagerSession {
   message_count: number;
   updated_at: string;
   running_summary: string | null;
+  name: string;
+  order_type: string;
 }
 
 interface ChatManagerMessage {
@@ -482,7 +485,7 @@ function mapSessionToConversation(session: ChatManagerSession, caller: ChatManag
   return {
     id: session.session_id,
     phone: caller.user_id,
-    name: caller.name || "Unknown",
+    name: session.name || caller.name || "Unknown",
     intent: "",
     state: "done",
     channel: "phone",
@@ -918,6 +921,8 @@ function mapChatManagerMessage(m: ChatManagerMessage): Message {
         {tab === "dashboard" && (
           <DashboardScreen
             api={API}
+            telephonyApi={TELEPHONY_API}
+            chatManagerApi={CHAT_MANAGER_API}
             refreshKey={operationsRefreshKey}
             accountMenu={<AccountMenu {...accountMenuProps} />}
             onOpenApprovals={() => setTab("approvals")}
@@ -995,13 +1000,14 @@ function mapChatManagerMessage(m: ChatManagerMessage): Message {
           <KitchenTab
             api={API}
             telephonyApi={TELEPHONY_API}
+            chatManagerApi={CHAT_MANAGER_API}
             refreshKey={operationsRefreshKey}
             accountMenu={<AccountMenu {...accountMenuProps} compact />}
           />
         )}
         {tab === "kanban" && <ManagerKanbanTab api={API} refreshKey={operationsRefreshKey} />}
-        {tab === "customers" && <CustomersTab api={API} />}
-        {tab === "menu" && <MenuScreen api={API} />}
+        {tab === "customers" && <CustomersTab api={CHAT_MANAGER_API} />}
+        {tab === "menu" && <MenuScreen api={CHAT_MANAGER_API} />}
         {tab === "analytics" && <AnalyticsScreen api={API} refreshKey={operationsRefreshKey} />}
         {tab === "settings" && <SettingsTab restaurant={restaurant} />}
       </main>
@@ -1518,6 +1524,8 @@ interface TelephonyOrderRecord {
   user_id: string;
   session_id: string | null;
   order_type: string;
+  name?: string;
+  channel?: string;
   order: {
     customer_name?: string;
     fulfillment?: string;
@@ -1566,10 +1574,10 @@ function mapTelephonyOrderToKitchenOrder(record: TelephonyOrderRecord): KitchenO
   return {
     id: record.call_uuid,
     order_number: record.call_uuid.slice(0, 8).toUpperCase(),
-    customer_name: order.customer_name || "Unknown",
+    customer_name: order.customer_name || record.name || "Unknown",
     customer_phone: record.user_id || "",
     order_type: mapOrderTypeToFilterBucket(record.order_type),
-    channel: "phone",
+    channel: record.channel || "phone",
     items: mapTelephonyItems(order.items),
     pickup_time: order.preparation_minutes || "",
     fulfillment_method: order.fulfillment,
@@ -1586,11 +1594,13 @@ function mapTelephonyOrderToKitchenOrder(record: TelephonyOrderRecord): KitchenO
 function KitchenTab({
   api,
   telephonyApi,
+  chatManagerApi,
   refreshKey,
   accountMenu,
 }: {
   api: string;
   telephonyApi: string;
+  chatManagerApi: string;
   refreshKey: number;
   accountMenu: ReactNode;
 }) {
@@ -1605,10 +1615,28 @@ function KitchenTab({
 
   async function loadOrders() {
     try {
-      const r = await fetch(`${telephonyApi}/orders/recent`);
-      if (!r.ok) return;
-      const data: { orders: TelephonyOrderRecord[] } = await r.json();
-      const next = data.orders
+      const [telephonyResponse, chatResponse] = await Promise.all([
+        fetch(`${telephonyApi}/orders/recent`),
+        fetch(`${chatManagerApi}/orders/recent`),
+      ]);
+      const telephonyData: { orders: TelephonyOrderRecord[] } = telephonyResponse.ok
+        ? await telephonyResponse.json()
+        : { orders: [] };
+      const chatData: { orders: TelephonyOrderRecord[] } = chatResponse.ok
+        ? await chatResponse.json()
+        : { orders: [] };
+      if (!telephonyResponse.ok && !chatResponse.ok) return;
+
+      // Phone orders are present in both stores. Prefer telephony's event copy,
+      // then add browser/direct-chat orders that have no matching session.
+      const phoneSessionIds = new Set(
+        telephonyData.orders.map((record) => record.session_id).filter(Boolean)
+      );
+      const merged = [
+        ...telephonyData.orders,
+        ...chatData.orders.filter((record) => !phoneSessionIds.has(record.session_id)),
+      ].sort((a, b) => b.emitted_at.localeCompare(a.emitted_at));
+      const next = merged
         .map(mapTelephonyOrderToKitchenOrder)
         .filter((o): o is KitchenOrder => o !== null);
       setOrders(next);
@@ -1680,7 +1708,7 @@ function KitchenTab({
     loadOrders();
     const interval = setInterval(loadOrders, 10000);
     return () => clearInterval(interval);
-  }, [api]);
+  }, [api, telephonyApi, chatManagerApi]);
 
   useEffect(() => {
     loadOrders();
@@ -1910,11 +1938,11 @@ function ManagerKanbanTab({ api, refreshKey }: { api: string; refreshKey: number
 function CustomersTab({ api }: { api: string }) {
   const [customers, setCustomers] = useState<CrmCustomer[]>([]);
   const [query, setQuery] = useState("");
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   async function loadCustomers() {
     try {
-      const r = await fetch(`${api}/api/crm/customers`);
+      const r = await fetch(`${api}/crm/customers`);
       if (r.ok) setCustomers(await r.json());
     } catch { /* retain last successful data during outages */ }
   }
