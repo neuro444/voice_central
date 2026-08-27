@@ -40,8 +40,8 @@ const RUNTIME_LABEL: Record<string, string> = {
   elevenagents: "ElevenAgents",
 };
 function ChannelBadge({ channel, runtime }: { channel?: string; runtime?: string | null }) {
-  const key = (channel || "whatsapp").toLowerCase();
-  const m = CHANNEL_META[key] || CHANNEL_META.whatsapp;
+  const key = (channel || "phone").toLowerCase();
+  const m = CHANNEL_META[key] || CHANNEL_META.phone;
   const rt = runtime ? RUNTIME_LABEL[runtime.toLowerCase()] : "";
   const label = key === "phone" && rt ? `${m.label} · ${rt}` : m.label;
   return (
@@ -837,7 +837,7 @@ function mapChatManagerMessage(m: ChatManagerMessage): Message {
           <a
             href="#calls"
             className={tab === "whatsapp_inbox" || tab === "phone_inbox" ? "active" : ""}
-            onClick={(e) => { e.preventDefault(); setTab("whatsapp_inbox"); }}
+            onClick={(e) => { e.preventDefault(); setTab("phone_inbox"); }}
           >
             <span className="sidebar-icon" aria-hidden="true">◌</span><span className="sidebar-link-label">Calls &amp; Messages</span>
           </a>
@@ -928,7 +928,7 @@ function mapChatManagerMessage(m: ChatManagerMessage): Message {
             onOpenApprovals={() => setTab("approvals")}
             restaurantName={restaurant?.name || "Restaurant"}
             conversations={conversations}
-            onOpenConversations={() => setTab("whatsapp_inbox")}
+            onOpenConversations={() => setTab("phone_inbox")}
           />
         )}
 

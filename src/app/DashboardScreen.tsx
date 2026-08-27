@@ -262,7 +262,7 @@ export default function DashboardScreen({
               <button type="button" key={conversation.id} onClick={onOpenConversations}>
                 <span className="dashboard-activity-avatar">{(conversation.name || conversation.phone || "?").slice(0, 1).toUpperCase()}</span>
                 <span><strong>{conversation.name || conversation.phone || "Unknown caller"}</strong><small>{conversation.last_message || "No message content"}</small></span>
-                <span><time>{new Date(conversation.last_message_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time><em>{conversation.channel || "WhatsApp"}</em></span>
+                <span><time>{new Date(conversation.last_message_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time><em>{conversation.channel || "Phone"}</em></span>
               </button>
             ))}</div>
           )}

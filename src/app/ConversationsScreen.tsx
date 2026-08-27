@@ -43,9 +43,9 @@ interface ConversationsScreenProps {
 }
 
 function normalizedChannel(conversation: ConversationRecord): ConversationChannel | "sms" {
-  const channel = (conversation.channel || "whatsapp").toLowerCase();
+  const channel = (conversation.channel || "phone").toLowerCase();
   if (channel === "phone" || channel === "sms") return channel;
-  return "whatsapp";
+  return "phone";
 }
 
 function displayName(conversation: ConversationRecord): string {
