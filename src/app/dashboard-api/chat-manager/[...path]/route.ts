@@ -12,6 +12,7 @@ const ALLOWED_ROUTES = [
   /^sessions\/[A-Za-z0-9_-]+\/(?:messages|debug)$/,
   /^orders\/recent$/,
   /^menu$/,
+  /^menu\/search$/,
   /^crm\/customers$/,
 ];
 

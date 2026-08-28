@@ -109,6 +109,7 @@ export function MenuScreen({ api }: { api: string }) {
   const [cakePreviews, setCakePreviews] = useState<Record<string, CakePreview>>({});
   const [activeSource] = useState<MenuSource>("takeaway");
   const [query, setQuery] = useState("");
+  const [menuMatches, setMenuMatches] = useState<Set<string> | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -180,23 +181,43 @@ export function MenuScreen({ api }: { api: string }) {
 
   useEffect(() => { void loadMenu(); }, [loadMenu]);
 
+  useEffect(() => {
+    const q = query.trim();
+    if (!q) { setMenuMatches(null); return; }
+    const handle = setTimeout(async () => {
+      try {
+        const res = await fetch(`/dashboard-api/chat-manager/menu/search?q=${encodeURIComponent(q)}`);
+        if (!res.ok) { setMenuMatches(new Set()); return; }
+        const items = await res.json();
+        setMenuMatches(new Set(items.map((it: { name: string }) => it.name.toLowerCase())));
+      } catch {
+        setMenuMatches(new Set());
+      }
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [query]);
+
   const normalizedQuery = query.trim().toLowerCase();
   const visibleTakeawaySections = useMemo(() => menu.takeaway.sections
     .map((section) => ({
       ...section,
       items: section.items.filter((item) =>
-        `${section.label} ${item.name}`.toLowerCase().includes(normalizedQuery)
+        menuMatches
+          ? menuMatches.has(item.name.toLowerCase())
+          : `${section.label} ${item.name}`.toLowerCase().includes(normalizedQuery)
       ),
     }))
-    .filter((section) => section.items.length > 0), [menu.takeaway.sections, normalizedQuery]);
+    .filter((section) => section.items.length > 0), [menu.takeaway.sections, normalizedQuery, menuMatches]);
   const visibleCateringSections = useMemo(() => menu.catering.sections
     .map((section) => ({
       ...section,
       items: section.items.filter((item) =>
-        `${section.name} ${item.name}`.toLowerCase().includes(normalizedQuery)
+        menuMatches
+          ? menuMatches.has(item.name.toLowerCase())
+          : `${section.name} ${item.name}`.toLowerCase().includes(normalizedQuery)
       ),
     }))
-    .filter((section) => section.items.length > 0), [menu.catering.sections, normalizedQuery]);
+    .filter((section) => section.items.length > 0), [menu.catering.sections, normalizedQuery, menuMatches]);
   const visibleCakeClasses = useMemo(() => menu.cakes.classes
     .map((cakeClass) => {
       const classMatches = cakeClass.name.toLowerCase().includes(normalizedQuery);
