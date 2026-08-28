@@ -34,6 +34,15 @@ interface CompletedOrderRecord {
   } | null;
 }
 
+interface HandoffRecord {
+  session_id: string;
+  user_id: string;
+  order_type: string;
+  summary: string;
+  answer: string;
+  emitted_at: string;
+}
+
 interface DashboardApproval {
   approval_id: number;
   customer_name: string;
@@ -182,6 +191,22 @@ export default function DashboardScreen({
 }) {
   const [orders, setOrders] = useState<DashboardOrder[]>([]);
   const [approvals, setApprovals] = useState<DashboardApproval[]>([]);
+  const [handoffs, setHandoffs] = useState<HandoffRecord[]>([]);
+
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      try {
+        const res = await fetch("/dashboard-api/telephony/handoffs/recent");
+        if (!res.ok) return;
+        const data = await res.json();
+        if (active) setHandoffs(Array.isArray(data) ? data : []);
+      } catch { /* keep last data on transient failure */ }
+    };
+    load();
+    const timer = setInterval(load, 15000);
+    return () => { active = false; clearInterval(timer); };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -264,6 +289,20 @@ export default function DashboardScreen({
                 <span><strong>{conversation.name || conversation.phone || "Unknown caller"}</strong><small>{conversation.last_message || "No message content"}</small></span>
                 <span><time>{new Date(conversation.last_message_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time><em>{conversation.channel || "WhatsApp"}</em></span>
               </button>
+            ))}</div>
+          )}
+        </section>
+        <section className="activity-panel">
+          <div className="dashboard-section-header"><h2>Manager Handoffs</h2></div>
+          {handoffs.length === 0 ? (
+            <div className="dashboard-activity-empty"><strong>No pending handoffs</strong><small>Cake and catering callback requests will appear here.</small></div>
+          ) : (
+            <div className="dashboard-activity-list">{handoffs.slice(0, 6).map((handoff) => (
+              <div className="handoff-card" key={handoff.session_id}>
+                <span className="dashboard-activity-avatar">{(handoff.order_type || "?").slice(0, 1).toUpperCase()}</span>
+                <span><strong>{handoff.order_type || "Callback"}</strong><small>{handoff.summary || handoff.answer || "Manager callback requested"}</small></span>
+                <span><time>{new Date(handoff.emitted_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time><em>Callback</em></span>
+              </div>
             ))}</div>
           )}
         </section>
