@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import type { ReactNode, RefObject } from "react";
 
 export type ConversationChannel = "phone" | "whatsapp";
@@ -94,9 +95,31 @@ export default function ConversationsScreen({
   onStaffDraftChange,
   onSendStaffMessage,
 }: ConversationsScreenProps) {
-  const visibleConversations = conversations.filter(
-    (conversation) => normalizedChannel(conversation) === activeChannel
-  );
+  const [searchQuery, setSearchQuery] = useState("");
+  const [matchedSessionIds, setMatchedSessionIds] = useState<string[] | null>(null);
+
+  useEffect(() => {
+    const q = searchQuery.trim();
+    if (!q) { setMatchedSessionIds(null); return; }
+    const handle = setTimeout(async () => {
+      try {
+        const res = await fetch(`/dashboard-api/chat-manager/search?q=${encodeURIComponent(q)}`);
+        if (!res.ok) { setMatchedSessionIds([]); return; }
+        const hits = await res.json();
+        setMatchedSessionIds(hits.map((h: { session_id: string }) => h.session_id));
+      } catch {
+        setMatchedSessionIds([]);
+      }
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [searchQuery]);
+
+  const visibleConversations = conversations.filter((conversation) => {
+    if (matchedSessionIds !== null) {
+      return matchedSessionIds.includes(conversation.id);
+    }
+    return normalizedChannel(conversation) === activeChannel;
+  });
 
   return (
     <div className="conversations-screen">
@@ -156,6 +179,15 @@ export default function ConversationsScreen({
                   Clear selection
                 </button>
               )}
+            </div>
+
+            <div className="conversation-search">
+              <input
+                type="search"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search all conversations…"
+              />
             </div>
 
             <div className="conversation-log-list">

@@ -979,6 +979,23 @@ textarea.editable-draft:focus { outline: 2px solid var(--accent); }
 .conversation-panel-heading button:hover {
   background: #fff0ee;
 }
+.conversation-search {
+  padding: 12px 16px 4px;
+}
+.conversation-search input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 14px;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 10px;
+  font-size: 14px;
+  background: #fff;
+  outline: none;
+}
+.conversation-search input:focus {
+  border-color: #9b1c1c;
+  box-shadow: 0 0 0 3px rgba(155, 28, 28, 0.1);
+}
 .conversation-log-list {
   min-height: 0;
   flex: 1;

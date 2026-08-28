@@ -7,6 +7,7 @@ export const dynamic = "force-dynamic";
 
 const ALLOWED_ROUTES = [
   /^callers$/,
+  /^search$/,
   /^sessions$/,
   /^sessions\/[A-Za-z0-9_-]+\/(?:messages|debug)$/,
   /^orders\/recent$/,
