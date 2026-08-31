@@ -1608,6 +1608,7 @@ function KitchenTab({
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [printingId, setPrintingId] = useState<string | null>(null);
   const [filter, setFilter] = useState<"takeaway" | "catering" | "all">("all");
+  const [orderQuery, setOrderQuery] = useState("");
   const [unprinted, setUnprinted] = useState<Set<string>>(new Set());
   // Order IDs we've already handled (printed or bulk-seen on first load), so a new order
   // is auto-printed exactly once and the existing backlog is never bulk-printed.
@@ -1714,7 +1715,13 @@ function KitchenTab({
     loadOrders();
   }, [refreshKey]);
 
-  const visibleOrders = orders.filter((order) => filter === "all" || order.order_type === filter);
+  const orderSearch = orderQuery.trim().toLowerCase();
+  const visibleOrders = orders.filter((order) => {
+    if (filter !== "all" && order.order_type !== filter) return false;
+    if (!orderSearch) return true;
+    const haystack = `${order.customer_name} ${order.items.map((it) => it.name || "").join(" ")}`.toLowerCase();
+    return haystack.includes(orderSearch);
+  });
 
   return (
     <div className="content orders-content">
@@ -1740,6 +1747,15 @@ function KitchenTab({
             </button>
           ))}
         </div>
+        <label className="orders-search">
+          <span aria-hidden="true">⌕</span>
+          <input
+            type="search"
+            value={orderQuery}
+            onChange={(e) => setOrderQuery(e.target.value)}
+            placeholder="Search orders by name or item…"
+          />
+        </label>
         <div className="orders-filter-actions">
           <button className="orders-refresh-button" onClick={loadOrders}><span aria-hidden="true">↻</span>Refresh</button>
         </div>
