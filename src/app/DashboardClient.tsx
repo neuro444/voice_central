@@ -535,9 +535,11 @@ function mapChatManagerMessage(m: ChatManagerMessage): Message {
       if (r.ok) setApprovals(await r.json());
     } catch { /* retain last successful data during outages */ }
   }
-  async function loadMessages(convId: string) {
+  async function loadMessages(convId: string, phone: string) {
     try {
-      const r = await fetch(`${CHAT_MANAGER_API}/sessions/${convId}/messages`);
+      const r = await fetch(
+        `${CHAT_MANAGER_API}/sessions/${convId}/messages?user_id=${encodeURIComponent(phone)}`
+      );
       if (r.ok) {
         const raw: ChatManagerMessage[] = await r.json();
         setMessages(raw.map(mapChatManagerMessage));
@@ -684,7 +686,7 @@ function mapChatManagerMessage(m: ChatManagerMessage): Message {
       const updated = { ...conv, state: "live_agent" };
       setSelectedConv(updated);
       showToast("Live chat started");
-      await loadMessages(conv.id);
+      await loadMessages(conv.id, conv.phone);
       await loadConversations();
     }
   }
@@ -700,7 +702,7 @@ function mapChatManagerMessage(m: ChatManagerMessage): Message {
     setStaffSending(false);
     if (res.ok) {
       setStaffDraft("");
-      await loadMessages(selectedConv.id);
+      await loadMessages(selectedConv.id, selectedConv.phone);
       await loadConversations();
     }
   }
@@ -715,7 +717,7 @@ function mapChatManagerMessage(m: ChatManagerMessage): Message {
     if (res.ok) {
       setSelectedConv({ ...selectedConv, state: "done" });
       showToast("Session ended");
-      await loadMessages(selectedConv.id);
+      await loadMessages(selectedConv.id, selectedConv.phone);
       await loadConversations();
     }
   }
@@ -734,7 +736,7 @@ function mapChatManagerMessage(m: ChatManagerMessage): Message {
   }, []);
 
   useEffect(() => {
-    if (selectedConv) loadMessages(selectedConv.id);
+    if (selectedConv) loadMessages(selectedConv.id, selectedConv.phone);
   }, [selectedConv]);
 
   useEffect(() => {
@@ -761,7 +763,7 @@ function mapChatManagerMessage(m: ChatManagerMessage): Message {
         setLiveMessages((prev) => [...prev.slice(-4), payload]);
         loadConversations();
         loadApprovals();
-        if (selectedConv) loadMessages(selectedConv.id);
+        if (selectedConv) loadMessages(selectedConv.id, selectedConv.phone);
       }
       if (
         payload.type === "kitchen_order_status_updated" ||
