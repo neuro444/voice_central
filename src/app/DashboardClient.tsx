@@ -1610,6 +1610,7 @@ function KitchenTab({
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [printingId, setPrintingId] = useState<string | null>(null);
   const [filter, setFilter] = useState<"takeaway" | "catering" | "all">("all");
+  const [orderSort, setOrderSort] = useState<"newest" | "oldest" | "customer">("newest");
   const [unprinted, setUnprinted] = useState<Set<string>>(new Set());
   // Order IDs we've already handled (printed or bulk-seen on first load), so a new order
   // is auto-printed exactly once and the existing backlog is never bulk-printed.
@@ -1716,7 +1717,14 @@ function KitchenTab({
     loadOrders();
   }, [refreshKey]);
 
-  const visibleOrders = orders.filter((order) => filter === "all" || order.order_type === filter);
+  const visibleOrders = orders
+    .filter((order) => filter === "all" || order.order_type === filter)
+    .slice()
+    .sort((a, b) => {
+      if (orderSort === "customer") return (a.customer_name || "").localeCompare(b.customer_name || "");
+      const cmp = (a.created_at || "").localeCompare(b.created_at || "");
+      return orderSort === "oldest" ? cmp : -cmp;
+    });
 
   return (
     <div className="content orders-content">
@@ -1743,6 +1751,14 @@ function KitchenTab({
           ))}
         </div>
         <div className="orders-filter-actions">
+          <label className="orders-sort">
+            <span>Sort</span>
+            <select value={orderSort} onChange={(e) => setOrderSort(e.target.value as "newest" | "oldest" | "customer")}>
+              <option value="newest">Newest first</option>
+              <option value="oldest">Oldest first</option>
+              <option value="customer">Customer A–Z</option>
+            </select>
+          </label>
           <button className="orders-refresh-button" onClick={loadOrders}><span aria-hidden="true">↻</span>Refresh</button>
         </div>
       </div>

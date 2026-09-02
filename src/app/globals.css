@@ -667,6 +667,22 @@ textarea.editable-draft:focus { outline: 2px solid var(--accent); }
 .orders-filter-pills button { min-width: 96px; padding: 8px 20px; border: 1px solid #e7e7ea; border-radius: 999px; background: #fff; color: #5d3f3c; font: inherit; font-size: 12px; font-weight: 500; cursor: pointer; }
 .orders-filter-pills button.active { border-color: rgba(211, 27, 33, 0.2); background: rgba(211, 27, 33, 0.1); color: #aa0011; font-weight: 600; }
 .orders-filter-actions { gap: 8px; }
+.orders-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted, #6b7280);
+}
+.orders-sort select {
+  padding: 6px 10px;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+  background: #fff;
+  font-size: 13px;
+  color: #111;
+  cursor: pointer;
+}
 .orders-test-button, .orders-refresh-button, .orders-print-button, .orders-pdf-button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid #e7e7ea; background: #fff; color: #281715; font: inherit; cursor: pointer; }
 .orders-test-button, .orders-refresh-button { min-height: 38px; padding: 7px 13px; border-radius: 8px; font-size: 12px; }
 .orders-test-button:hover, .orders-refresh-button:hover, .orders-print-button:hover, .orders-pdf-button:hover { border-color: #e6bdb8; background: #fff0ee; color: #aa0011; }
