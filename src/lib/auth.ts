@@ -77,11 +77,19 @@ export async function createSessionToken(
 // removed (someone leaving, a compromised login). Costs one DB read per
 // authenticated request; worth it for real revocation.
 export async function verifySessionToken(token: string | undefined): Promise<boolean> {
-  if (!token) return false;
+  return (await verifyAndDecodeSessionToken(token)) !== null;
+}
+
+// Like verifySessionToken but returns the decoded payload so callers can read
+// the staff username (sub) for audit logging.  Returns null on any failure.
+export async function verifyAndDecodeSessionToken(
+  token: string | undefined
+): Promise<{ sub: string; exp: number } | null> {
+  if (!token) return null;
   const secret = getSecret();
-  if (!secret) return false;
+  if (!secret) return null;
   const dot = token.indexOf(".");
-  if (dot <= 0) return false;
+  if (dot <= 0) return null;
   const payloadPart = token.slice(0, dot);
   const sigPart = token.slice(dot + 1);
   try {
@@ -92,13 +100,14 @@ export async function verifySessionToken(token: string | undefined): Promise<boo
       b64urlToBuffer(sigPart),
       new TextEncoder().encode(payloadPart)
     );
-    if (!ok) return false;
+    if (!ok) return null;
     const payload = JSON.parse(new TextDecoder().decode(b64urlToBuffer(payloadPart)));
-    if (typeof payload.exp !== "number" || payload.exp <= Date.now() / 1000) return false;
-    if (typeof payload.sub !== "string") return false;
-    return userExists(payload.sub);
+    if (typeof payload.exp !== "number" || payload.exp <= Date.now() / 1000) return null;
+    if (typeof payload.sub !== "string") return null;
+    if (!userExists(payload.sub)) return null;
+    return { sub: payload.sub, exp: payload.exp };
   } catch {
-    return false;
+    return null;
   }
 }
 
