@@ -928,6 +928,7 @@ function mapChatManagerMessage(m: ChatManagerMessage): Message {
             refreshKey={operationsRefreshKey}
             accountMenu={<AccountMenu {...accountMenuProps} />}
             onOpenApprovals={() => setTab("approvals")}
+            onApproveOrder={() => setTab("approvals")}
             restaurantName={restaurant?.name || "Restaurant"}
             conversations={conversations}
             onOpenConversations={() => setTab("whatsapp_inbox")}

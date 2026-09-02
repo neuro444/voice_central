@@ -61,6 +61,7 @@ interface QueueCard {
   items: string;
   total: number | null;
   onClick?: () => void;
+  onApprove?: () => void;
 }
 
 function orderTotal(order: DashboardOrder) {
@@ -136,6 +137,11 @@ function QueueColumn({
                 <strong className="dashboard-order-total">
                   {card.total == null ? "—" : `$${card.total.toFixed(2)}`}
                 </strong>
+                {card.onApprove && (
+                  <button type="button" className="btn btn-primary btn-sm" onClick={card.onApprove}>
+                    Approve
+                  </button>
+                )}
               </>
             );
             return card.onClick ? (
@@ -167,6 +173,7 @@ export default function DashboardScreen({
   refreshKey,
   accountMenu,
   onOpenApprovals,
+  onApproveOrder,
   restaurantName,
   conversations,
   onOpenConversations,
@@ -177,6 +184,7 @@ export default function DashboardScreen({
   refreshKey: number;
   accountMenu: ReactNode;
   onOpenApprovals: () => void;
+  onApproveOrder: (orderId: string) => void;
   restaurantName: string;
   conversations: DashboardConversation[];
   onOpenConversations: () => void;
@@ -240,7 +248,11 @@ export default function DashboardScreen({
     return () => { active = false; window.clearInterval(interval); };
   }, [api, telephonyApi, chatManagerApi, refreshKey]);
 
-  const needsApproval = approvals.map((approval) => approvalCard(approval, onOpenApprovals));
+  const pendingOrders = orders.filter((order) => order.approval_pending);
+  const needsApproval = [
+    ...approvals.map((approval) => approvalCard(approval, onOpenApprovals)),
+    ...pendingOrders.map((order) => ({ ...queueCard(order), onApprove: () => onApproveOrder(order.id) })),
+  ];
   const approved = orders.filter((order) => order.status === "received" && !order.approval_pending).map(queueCard);
   const preparing = orders.filter((order) => order.status === "preparing").map(queueCard);
   const ready = orders.filter((order) => order.status === "ready").map(queueCard);
