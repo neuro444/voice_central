@@ -17,25 +17,6 @@ function getSecret(): string | null {
   return s && s.length >= 16 ? s : null;
 }
 
-// Constant-time compare for credential checks.
-function safeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
-}
-
-export function verifyCredentials(username: string, password: string): boolean {
-  const expectedUser = process.env.DASHBOARD_ADMIN_USERNAME;
-  const expectedPass = process.env.DASHBOARD_ADMIN_PASSWORD;
-  if (!expectedUser || !expectedPass) {
-    throw new Error("DASHBOARD_ADMIN_USERNAME / DASHBOARD_ADMIN_PASSWORD not set");
-  }
-  const userOk = safeEqual(username, expectedUser);
-  const passOk = safeEqual(password, expectedPass);
-  return userOk && passOk;
-}
-
 function b64url(bytes: Uint8Array): string {
   let s = "";
   for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
@@ -62,11 +43,19 @@ async function hmacKey(secret: string): Promise<CryptoKey> {
 
 // Token = base64url(payload) + "." + base64url(hmac(payload)).
 // Returns null if the secret is unavailable (login will 500-guard on that).
-export async function createSessionToken(username: string): Promise<string | null> {
+// `restaurants` is carried in the token now (not queried again per request)
+// so it's available wherever the session is read -- e.g. once dashboard
+// views are actually scoped per restaurant, that work reads it from here
+// rather than needing another DB round trip added retroactively.
+export async function createSessionToken(
+  username: string,
+  restaurants: string[]
+): Promise<string | null> {
   const secret = getSecret();
   if (!secret) return null;
   const payload = {
     sub: username,
+    restaurants,
     exp: Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS,
   };
   const payloadPart = b64url(new TextEncoder().encode(JSON.stringify(payload)));
@@ -75,8 +64,16 @@ export async function createSessionToken(username: string): Promise<string | nul
   return `${payloadPart}.${b64url(new Uint8Array(sig))}`;
 }
 
-// FAIL CLOSED: any problem (no secret, bad format, bad signature, expired)
-// returns false, so the request is treated as unauthenticated.
+// FAIL CLOSED: any problem (no secret, bad format, bad signature, expired,
+// or the account no longer existing) returns false, so the request is
+// treated as unauthenticated.
+//
+// The account-existence check (userExists) is what makes removing a user
+// actually revoke their access. Without it, a signature-valid token for a
+// deleted account would keep working until its natural 8-hour expiry --
+// fine for one hardcoded admin, not fine once real staff accounts can be
+// removed (someone leaving, a compromised login). Costs one DB read per
+// authenticated request; worth it for real revocation.
 export async function verifySessionToken(token: string | undefined): Promise<boolean> {
   if (!token) return false;
   const secret = getSecret();
@@ -95,7 +92,10 @@ export async function verifySessionToken(token: string | undefined): Promise<boo
     );
     if (!ok) return false;
     const payload = JSON.parse(new TextDecoder().decode(b64urlToBuffer(payloadPart)));
-    return typeof payload.exp === "number" && payload.exp > Date.now() / 1000;
+    if (typeof payload.exp !== "number" || payload.exp <= Date.now() / 1000) return false;
+    if (typeof payload.sub !== "string") return false;
+    const { userExists } = await import("./users");
+    return userExists(payload.sub);
   } catch {
     return false;
   }
