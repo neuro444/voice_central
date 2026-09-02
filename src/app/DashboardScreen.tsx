@@ -25,6 +25,7 @@ interface CompletedOrderRecord {
   session_id: string | null;
   name?: string;
   channel?: string;
+  approval_pending?: boolean;
   order: {
     customer_name?: string;
     items?: Array<{ name?: string; quantity?: number }>;
@@ -224,7 +225,7 @@ export default function DashboardScreen({
               subtotal: numberValue(record.order.subtotal),
               tax: numberValue(record.order.tax),
               status: "received" as const,
-              approval_pending: false,
+              approval_pending: Boolean(record.approval_pending),
               created_at: record.emitted_at,
             }];
           }));
@@ -262,7 +263,7 @@ export default function DashboardScreen({
               <button type="button" key={conversation.id} onClick={onOpenConversations}>
                 <span className="dashboard-activity-avatar">{(conversation.name || conversation.phone || "?").slice(0, 1).toUpperCase()}</span>
                 <span><strong>{conversation.name || conversation.phone || "Unknown caller"}</strong><small>{conversation.last_message || "No message content"}</small></span>
-                <span><time>{new Date(conversation.last_message_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time><em>{conversation.channel || "WhatsApp"}</em></span>
+                <span><time>{new Date(conversation.last_message_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time><em>{conversation.channel || "Phone"}</em></span>
               </button>
             ))}</div>
           )}
