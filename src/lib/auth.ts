@@ -9,6 +9,8 @@
 //   * FAIL CLOSED: if the secret is missing, verification returns false and the
 //     user is sent to /login. A misconfiguration can never become a bypass.
 
+import { userExists } from "./users";
+
 export const SESSION_COOKIE = "dash_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 8; // 8 hours
 
@@ -94,7 +96,6 @@ export async function verifySessionToken(token: string | undefined): Promise<boo
     const payload = JSON.parse(new TextDecoder().decode(b64urlToBuffer(payloadPart)));
     if (typeof payload.exp !== "number" || payload.exp <= Date.now() / 1000) return false;
     if (typeof payload.sub !== "string") return false;
-    const { userExists } = await import("./users");
     return userExists(payload.sub);
   } catch {
     return false;

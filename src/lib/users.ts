@@ -119,25 +119,20 @@ export function addUser(username: string, password: string, restaurantSlugs: str
     | { id: number }
     | undefined;
 
-  const userId = existing
-    ? (db.prepare("UPDATE users SET password_hash = ?, salt = ? WHERE id = ?").run(hash, salt, existing.id), existing.id)
-    : (db.prepare("INSERT INTO users (username, password_hash, salt) VALUES (?, ?, ?)").run(username, hash, salt)
-        .lastInsertRowid as number);
+  let userId: number;
+  if (existing) {
+    db.prepare("UPDATE users SET password_hash = ?, salt = ? WHERE id = ?").run(hash, salt, existing.id);
+    userId = existing.id;
+  } else {
+    const result = db
+      .prepare("INSERT INTO users (username, password_hash, salt) VALUES (?, ?, ?)")
+      .run(username, hash, salt);
+    userId = result.lastInsertRowid as number;
+  }
 
   for (const restaurantId of restaurantIds) {
     db.prepare(
       "INSERT OR IGNORE INTO user_restaurants (user_id, restaurant_id) VALUES (?, ?)"
     ).run(userId, restaurantId);
   }
-}
-
-export function removeUser(username: string): boolean {
-  const db = getDb();
-  const result = db.prepare("DELETE FROM users WHERE username = ?").run(username);
-  return result.changes > 0;
-}
-
-export function createRestaurant(slug: string, name: string): void {
-  const db = getDb();
-  db.prepare("INSERT INTO restaurants (slug, name) VALUES (?, ?)").run(slug, name);
 }
