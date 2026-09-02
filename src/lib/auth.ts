@@ -78,11 +78,19 @@ export async function createSessionToken(username: string): Promise<string | nul
 // FAIL CLOSED: any problem (no secret, bad format, bad signature, expired)
 // returns false, so the request is treated as unauthenticated.
 export async function verifySessionToken(token: string | undefined): Promise<boolean> {
-  if (!token) return false;
+  return (await verifyAndDecodeSessionToken(token)) !== null;
+}
+
+// Like verifySessionToken but returns the decoded payload so callers can read
+// the staff username (sub) for audit logging.  Returns null on any failure.
+export async function verifyAndDecodeSessionToken(
+  token: string | undefined
+): Promise<{ sub: string; exp: number } | null> {
+  if (!token) return null;
   const secret = getSecret();
-  if (!secret) return false;
+  if (!secret) return null;
   const dot = token.indexOf(".");
-  if (dot <= 0) return false;
+  if (dot <= 0) return null;
   const payloadPart = token.slice(0, dot);
   const sigPart = token.slice(dot + 1);
   try {
@@ -93,11 +101,13 @@ export async function verifySessionToken(token: string | undefined): Promise<boo
       b64urlToBuffer(sigPart),
       new TextEncoder().encode(payloadPart)
     );
-    if (!ok) return false;
+    if (!ok) return null;
     const payload = JSON.parse(new TextDecoder().decode(b64urlToBuffer(payloadPart)));
-    return typeof payload.exp === "number" && payload.exp > Date.now() / 1000;
+    if (typeof payload.exp !== "number" || payload.exp <= Date.now() / 1000) return null;
+    if (typeof payload.sub !== "string") return null;
+    return { sub: payload.sub, exp: payload.exp };
   } catch {
-    return false;
+    return null;
   }
 }
 
