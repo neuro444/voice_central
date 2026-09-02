@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   SESSION_COOKIE,
-  verifyCredentials,
   createSessionToken,
   sessionCookieOptions,
   isRateLimited,
   recordFailure,
   clearFailures,
 } from "@/lib/auth";
+import { verifyUserCredentials } from "@/lib/users";
 
 export const runtime = "nodejs";
 
@@ -42,7 +42,8 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (!verifyCredentials(username, password)) {
+  const user = verifyUserCredentials(username, password);
+  if (!user) {
     recordFailure(key);
     return NextResponse.json(
       { error: "Incorrect username or password." },
@@ -50,7 +51,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const token = await createSessionToken(username);
+  const token = await createSessionToken(user.username, user.restaurants);
   if (!token) {
     // Secret is missing/misconfigured. Refuse to issue a session rather than
     // set one that middleware would reject (fail closed, and make it loud).
