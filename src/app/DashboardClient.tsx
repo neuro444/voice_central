@@ -1593,6 +1593,25 @@ function mapTelephonyOrderToKitchenOrder(record: TelephonyOrderRecord): KitchenO
   };
 }
 
+function mapHandoffToKitchenOrder(record: TelephonyOrderRecord): KitchenOrder {
+  return {
+    id: record.call_uuid,
+    order_number: record.call_uuid.slice(0, 8).toUpperCase(),
+    customer_name: record.name || "Unknown",
+    customer_phone: record.user_id || "",
+    order_type: "catering",
+    channel: record.channel || "phone",
+    items: [],
+    pickup_time: "",
+    estimated_total: null,
+    subtotal: null,
+    tax: null,
+    approval_pending: true,
+    status: "received",
+    created_at: record.emitted_at,
+  };
+}
+
 function KitchenTab({
   api,
   telephonyApi,
@@ -1617,9 +1636,10 @@ function KitchenTab({
 
   async function loadOrders() {
     try {
-      const [telephonyResponse, chatResponse] = await Promise.all([
+      const [telephonyResponse, chatResponse, handoffResponse] = await Promise.all([
         fetch(`${telephonyApi}/orders/recent`),
         fetch(`${chatManagerApi}/orders/recent`),
+        fetch(`${telephonyApi}/handoffs/recent`),
       ]);
       const telephonyData: { orders: TelephonyOrderRecord[] } = telephonyResponse.ok
         ? await telephonyResponse.json()
@@ -1641,7 +1661,12 @@ function KitchenTab({
       const next = merged
         .map(mapTelephonyOrderToKitchenOrder)
         .filter((o): o is KitchenOrder => o !== null);
-      setOrders(next);
+      const handoffData: { handoffs?: TelephonyOrderRecord[] } | TelephonyOrderRecord[] = handoffResponse.ok
+        ? await handoffResponse.json()
+        : [];
+      const handoffList = Array.isArray(handoffData) ? handoffData : (handoffData.handoffs || []);
+      const cateringOrders = handoffList.map(mapHandoffToKitchenOrder);
+      setOrders([...next, ...cateringOrders]);
 
     // First load: remember everything without printing the backlog.
     if (seenIds.current === null) {
