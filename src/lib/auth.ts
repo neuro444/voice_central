@@ -9,31 +9,14 @@
 //   * FAIL CLOSED: if the secret is missing, verification returns false and the
 //     user is sent to /login. A misconfiguration can never become a bypass.
 
+import { userExists } from "./users";
+
 export const SESSION_COOKIE = "dash_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 8; // 8 hours
 
 function getSecret(): string | null {
   const s = process.env.DASHBOARD_SESSION_SECRET;
   return s && s.length >= 16 ? s : null;
-}
-
-// Constant-time compare for credential checks.
-function safeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
-}
-
-export function verifyCredentials(username: string, password: string): boolean {
-  const expectedUser = process.env.DASHBOARD_ADMIN_USERNAME;
-  const expectedPass = process.env.DASHBOARD_ADMIN_PASSWORD;
-  if (!expectedUser || !expectedPass) {
-    throw new Error("DASHBOARD_ADMIN_USERNAME / DASHBOARD_ADMIN_PASSWORD not set");
-  }
-  const userOk = safeEqual(username, expectedUser);
-  const passOk = safeEqual(password, expectedPass);
-  return userOk && passOk;
 }
 
 function b64url(bytes: Uint8Array): string {
@@ -62,11 +45,19 @@ async function hmacKey(secret: string): Promise<CryptoKey> {
 
 // Token = base64url(payload) + "." + base64url(hmac(payload)).
 // Returns null if the secret is unavailable (login will 500-guard on that).
-export async function createSessionToken(username: string): Promise<string | null> {
+// `restaurants` is carried in the token now (not queried again per request)
+// so it's available wherever the session is read -- e.g. once dashboard
+// views are actually scoped per restaurant, that work reads it from here
+// rather than needing another DB round trip added retroactively.
+export async function createSessionToken(
+  username: string,
+  restaurants: string[]
+): Promise<string | null> {
   const secret = getSecret();
   if (!secret) return null;
   const payload = {
     sub: username,
+    restaurants,
     exp: Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS,
   };
   const payloadPart = b64url(new TextEncoder().encode(JSON.stringify(payload)));
@@ -75,14 +66,30 @@ export async function createSessionToken(username: string): Promise<string | nul
   return `${payloadPart}.${b64url(new Uint8Array(sig))}`;
 }
 
-// FAIL CLOSED: any problem (no secret, bad format, bad signature, expired)
-// returns false, so the request is treated as unauthenticated.
+// FAIL CLOSED: any problem (no secret, bad format, bad signature, expired,
+// or the account no longer existing) returns false, so the request is
+// treated as unauthenticated.
+//
+// The account-existence check (userExists) is what makes removing a user
+// actually revoke their access. Without it, a signature-valid token for a
+// deleted account would keep working until its natural 8-hour expiry --
+// fine for one hardcoded admin, not fine once real staff accounts can be
+// removed (someone leaving, a compromised login). Costs one DB read per
+// authenticated request; worth it for real revocation.
 export async function verifySessionToken(token: string | undefined): Promise<boolean> {
-  if (!token) return false;
+  return (await verifyAndDecodeSessionToken(token)) !== null;
+}
+
+// Like verifySessionToken but returns the decoded payload so callers can read
+// the staff username (sub) for audit logging.  Returns null on any failure.
+export async function verifyAndDecodeSessionToken(
+  token: string | undefined
+): Promise<{ sub: string; exp: number } | null> {
+  if (!token) return null;
   const secret = getSecret();
-  if (!secret) return false;
+  if (!secret) return null;
   const dot = token.indexOf(".");
-  if (dot <= 0) return false;
+  if (dot <= 0) return null;
   const payloadPart = token.slice(0, dot);
   const sigPart = token.slice(dot + 1);
   try {
@@ -93,11 +100,14 @@ export async function verifySessionToken(token: string | undefined): Promise<boo
       b64urlToBuffer(sigPart),
       new TextEncoder().encode(payloadPart)
     );
-    if (!ok) return false;
+    if (!ok) return null;
     const payload = JSON.parse(new TextDecoder().decode(b64urlToBuffer(payloadPart)));
-    return typeof payload.exp === "number" && payload.exp > Date.now() / 1000;
+    if (typeof payload.exp !== "number" || payload.exp <= Date.now() / 1000) return null;
+    if (typeof payload.sub !== "string") return null;
+    if (!userExists(payload.sub)) return null;
+    return { sub: payload.sub, exp: payload.exp };
   } catch {
-    return false;
+    return null;
   }
 }
 

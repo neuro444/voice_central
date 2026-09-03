@@ -10,6 +10,14 @@
 .env.local
 .env.*.local
 
+# dashboard user database (password hashes -- never commit)
+/data/voice_central.db
+/data/voice_central.db-wal
+/data/voice_central.db-shm
+
+# dashboard audit log (staff activity records -- runtime output, not source)
+/logs/
+
 # typescript build info
 *.tsbuildinfo
 next-env.d.ts
