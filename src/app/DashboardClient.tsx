@@ -963,7 +963,14 @@ function mapChatManagerMessage(m: ChatManagerMessage): Message {
             refreshKey={operationsRefreshKey}
             accountMenu={<AccountMenu {...accountMenuProps} />}
             onOpenApprovals={() => setTab("approvals")}
-            onApproveOrder={() => setTab("approvals")}
+            onApproveOrder={async (orderId: string) => {
+              try {
+                await fetch(`/dashboard-api/chat-manager/api/approvals/${encodeURIComponent(orderId)}/approve`, { method: "POST" });
+                setOperationsRefreshKey((k) => k + 1);
+              } catch {
+                /* ignore; next refresh will reflect state */
+              }
+            }}
             restaurantName={restaurant?.name || "Restaurant"}
             conversations={conversations}
             onOpenConversations={() => setTab("whatsapp_inbox")}

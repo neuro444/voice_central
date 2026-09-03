@@ -191,6 +191,7 @@ export default function DashboardScreen({
 }) {
   const [orders, setOrders] = useState<DashboardOrder[]>([]);
   const [approvals, setApprovals] = useState<DashboardApproval[]>([]);
+  const [approvalDecisions, setApprovalDecisions] = useState<Record<string, string>>({});
 
   useEffect(() => {
     let active = true;
@@ -242,19 +243,35 @@ export default function DashboardScreen({
       } catch {
         // Preserve the last successful view while the backend is temporarily unavailable.
       }
+      fetch("/dashboard-api/chat-manager/api/approvals")
+        .then((r) => (r.ok ? r.json() : {}))
+        .then((data) => setApprovalDecisions(
+          data && typeof data === "object" && !Array.isArray(data)
+            ? data as Record<string, string>
+            : {}
+        ))
+        .catch(() => {});
     }
     void loadDashboardData();
     const interval = window.setInterval(loadDashboardData, 10000);
     return () => { active = false; window.clearInterval(interval); };
   }, [api, telephonyApi, chatManagerApi, refreshKey]);
 
-  const pendingOrders = orders.filter((order) => order.approval_pending);
+  const pendingOrders = orders.filter(
+    (order) => order.approval_pending && approvalDecisions[order.id] !== "approved" && approvalDecisions[order.id] !== "rejected"
+  );
   const approvalList = Array.isArray(approvals) ? approvals : [];
   const needsApproval = [
     ...approvalList.map((approval) => approvalCard(approval, onOpenApprovals)),
     ...pendingOrders.map((order) => ({ ...queueCard(order), onApprove: () => onApproveOrder(order.id) })),
   ];
-  const approved = orders.filter((order) => order.status === "received" && !order.approval_pending).map(queueCard);
+  const approved = orders
+    .filter(
+      (order) =>
+        approvalDecisions[order.id] === "approved" ||
+        (order.status === "received" && !order.approval_pending)
+    )
+    .map(queueCard);
   const preparing = orders.filter((order) => order.status === "preparing").map(queueCard);
   const ready = orders.filter((order) => order.status === "ready").map(queueCard);
 
