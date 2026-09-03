@@ -46,8 +46,8 @@ const RUNTIME_LABEL: Record<string, string> = {
   elevenagents: "ElevenAgents",
 };
 function ChannelBadge({ channel, runtime }: { channel?: string; runtime?: string | null }) {
-  const key = (channel || "whatsapp").toLowerCase();
-  const m = CHANNEL_META[key] || CHANNEL_META.whatsapp;
+  const key = (channel || "phone").toLowerCase();
+  const m = CHANNEL_META[key] || CHANNEL_META.phone;
   const rt = runtime ? RUNTIME_LABEL[runtime.toLowerCase()] : "";
   const label = key === "phone" && rt ? `${m.label} · ${rt}` : m.label;
   return (
@@ -874,7 +874,7 @@ function mapChatManagerMessage(m: ChatManagerMessage): Message {
           <a
             href="#calls"
             className={tab === "whatsapp_inbox" || tab === "phone_inbox" ? "active" : ""}
-            onClick={(e) => { e.preventDefault(); setTab("whatsapp_inbox"); }}
+            onClick={(e) => { e.preventDefault(); setTab("phone_inbox"); }}
           >
             <span className="sidebar-icon" aria-hidden="true">◌</span><span className="sidebar-link-label">Calls &amp; Messages</span>
           </a>
@@ -965,7 +965,7 @@ function mapChatManagerMessage(m: ChatManagerMessage): Message {
             onOpenApprovals={() => setTab("approvals")}
             restaurantName={restaurant?.name || "Restaurant"}
             conversations={conversations}
-            onOpenConversations={() => setTab("whatsapp_inbox")}
+            onOpenConversations={() => setTab("phone_inbox")}
           />
         )}
 
@@ -1016,7 +1016,7 @@ function mapChatManagerMessage(m: ChatManagerMessage): Message {
               setTab(channel === "phone" ? "phone_inbox" : "whatsapp_inbox");
               setSelectedConv((current) => {
                 if (!current) return null;
-                const currentChannel = (current.channel || "whatsapp").toLowerCase();
+                const currentChannel = (current.channel || "phone").toLowerCase();
                 const matches = channel === "phone"
                   ? currentChannel === "phone"
                   : currentChannel !== "phone" && currentChannel !== "sms";
@@ -1563,6 +1563,7 @@ interface TelephonyOrderRecord {
   order_type: string;
   name?: string;
   channel?: string;
+  approval_pending?: boolean;
   order: {
     customer_name?: string;
     fulfillment?: string;
@@ -1621,8 +1622,33 @@ function mapTelephonyOrderToKitchenOrder(record: TelephonyOrderRecord): KitchenO
     estimated_total: toNum(order.total),
     subtotal: toNum(order.subtotal),
     tax: toNum(order.tax),
+    approval_pending: Boolean(record.approval_pending),
     // No lifecycle tracking exists in telephony yet -- every order defaults
     // to "received" until real status tracking is built there.
+    status: "received",
+    created_at: record.emitted_at,
+  };
+}
+
+// Manager handoffs have no priced order object yet. Surface cake/catering
+// callbacks in the existing Catering view without treating delivery redirects
+// as catering orders.
+function mapHandoffToKitchenOrder(record: TelephonyOrderRecord): KitchenOrder | null {
+  if (record.event !== "manager_handoff") return null;
+  if (record.order_type !== "cake" && record.order_type !== "catering" && record.order_type !== "cake/catering") return null;
+  return {
+    id: record.call_uuid,
+    order_number: record.call_uuid.slice(0, 8).toUpperCase(),
+    customer_name: record.name || "Manager callback",
+    customer_phone: record.user_id || "",
+    order_type: "catering",
+    channel: record.channel || "phone",
+    items: [],
+    pickup_time: "",
+    estimated_total: null,
+    subtotal: null,
+    tax: null,
+    approval_pending: Boolean(record.approval_pending),
     status: "received",
     created_at: record.emitted_at,
   };
@@ -1645,6 +1671,8 @@ function KitchenTab({
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [printingId, setPrintingId] = useState<string | null>(null);
   const [filter, setFilter] = useState<"takeaway" | "catering" | "all">("all");
+  const [orderQuery, setOrderQuery] = useState("");
+  const [orderSort, setOrderSort] = useState<"newest" | "oldest" | "customer">("newest");
   const [unprinted, setUnprinted] = useState<Set<string>>(new Set());
   // Order IDs we've already handled (printed or bulk-seen on first load), so a new order
   // is auto-printed exactly once and the existing backlog is never bulk-printed.
@@ -1652,9 +1680,10 @@ function KitchenTab({
 
   async function loadOrders() {
     try {
-      const [telephonyResponse, chatResponse] = await Promise.all([
+      const [telephonyResponse, chatResponse, handoffResponse] = await Promise.all([
         fetch(`${telephonyApi}/orders/recent`),
         fetch(`${chatManagerApi}/orders/recent`),
+        fetch(`${telephonyApi}/handoffs/recent`),
       ]);
       const telephonyData: { orders: TelephonyOrderRecord[] } = telephonyResponse.ok
         ? await telephonyResponse.json()
@@ -1676,18 +1705,25 @@ function KitchenTab({
       const next = merged
         .map(mapTelephonyOrderToKitchenOrder)
         .filter((o): o is KitchenOrder => o !== null);
-      setOrders(next);
+      const handoffData: { handoffs?: TelephonyOrderRecord[] } = handoffResponse.ok
+        ? await handoffResponse.json()
+        : { handoffs: [] };
+      const cateringOrders = (handoffData.handoffs || [])
+        .map(mapHandoffToKitchenOrder)
+        .filter((order): order is KitchenOrder => order !== null);
+      const allOrders = [...next, ...cateringOrders];
+      setOrders(allOrders);
 
     // First load: remember everything without printing the backlog.
     if (seenIds.current === null) {
-      seenIds.current = new Set(next.map((o) => o.id));
+      seenIds.current = new Set(allOrders.map((o) => o.id));
       return;
     }
 
     // An order appears here only AFTER a manager approves it (backend filters the kitchen
     // list to approved orders). So a newly-appeared order = a just-approved order: ring the
     // bell. We do NOT print here — the voice call already printed the ticket once on hangup.
-    const fresh = next.filter((o) => !seenIds.current!.has(o.id));
+    const fresh = allOrders.filter((o) => !seenIds.current!.has(o.id));
       for (const order of fresh) {
         seenIds.current!.add(order.id);
         playDing();                       // one ding per newly-approved order
@@ -1751,7 +1787,20 @@ function KitchenTab({
     loadOrders();
   }, [refreshKey]);
 
-  const visibleOrders = orders.filter((order) => filter === "all" || order.order_type === filter);
+  const normalizedOrderQuery = orderQuery.trim().toLowerCase();
+  const visibleOrders = orders
+    .filter((order) => filter === "all" || order.order_type === filter)
+    .filter((order) => {
+      if (!normalizedOrderQuery) return true;
+      const searchable = `${order.customer_name} ${order.customer_phone} ${order.items.map((item) => item.name || "").join(" ")}`.toLowerCase();
+      return searchable.includes(normalizedOrderQuery);
+    })
+    .slice()
+    .sort((a, b) => {
+      if (orderSort === "customer") return (a.customer_name || "").localeCompare(b.customer_name || "");
+      const byDate = (a.created_at || "").localeCompare(b.created_at || "");
+      return orderSort === "oldest" ? byDate : -byDate;
+    });
 
   return (
     <div className="content orders-content">
@@ -1777,7 +1826,24 @@ function KitchenTab({
             </button>
           ))}
         </div>
+        <label className="orders-search">
+          <span aria-hidden="true">⌕</span>
+          <input
+            type="search"
+            value={orderQuery}
+            onChange={(event) => setOrderQuery(event.target.value)}
+            placeholder="Search orders by customer or item…"
+          />
+        </label>
         <div className="orders-filter-actions">
+          <label className="orders-sort">
+            <span>Sort</span>
+            <select value={orderSort} onChange={(event) => setOrderSort(event.target.value as "newest" | "oldest" | "customer")}>
+              <option value="newest">Newest first</option>
+              <option value="oldest">Oldest first</option>
+              <option value="customer">Customer A–Z</option>
+            </select>
+          </label>
           <button className="orders-refresh-button" onClick={loadOrders}><span aria-hidden="true">↻</span>Refresh</button>
         </div>
       </div>
