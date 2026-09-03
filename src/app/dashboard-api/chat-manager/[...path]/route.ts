@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
+import { SESSION_COOKIE, verifyAndDecodeSessionToken } from "@/lib/auth";
+import { writeAuditLog } from "@/lib/audit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,7 +26,8 @@ export async function GET(
   context: { params: Promise<{ path: string[] }> }
 ) {
   const token = request.cookies.get(SESSION_COOKIE)?.value;
-  if (!(await verifySessionToken(token))) {
+  const session = await verifyAndDecodeSessionToken(token);
+  if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -53,6 +55,14 @@ export async function GET(
     const upstream = await fetch(upstreamUrl, {
       headers: { "X-API-Key": apiKey },
       cache: "no-store",
+    });
+    writeAuditLog({
+      timestamp: new Date().toISOString(),
+      staff: session.sub,
+      method: "GET",
+      path,
+      upstream: "chat_manager",
+      status: upstream.status,
     });
     return new NextResponse(await upstream.arrayBuffer(), {
       status: upstream.status,
