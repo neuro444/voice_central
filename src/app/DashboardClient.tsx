@@ -15,6 +15,12 @@ const CHAT_MANAGER_API = "/dashboard-api/chat-manager";
 const PRINT_API = process.env.NEXT_PUBLIC_PRINT_API_URL ?? "";
 const WS  = API.replace("http", "ws") + "/api/ws";
 
+declare global {
+  interface Window {
+    __authFetchPatched?: boolean;
+  }
+}
+
 interface Conversation {
   id: string;
   phone: string;
@@ -721,6 +727,35 @@ function mapChatManagerMessage(m: ChatManagerMessage): Message {
       await loadConversations();
     }
   }
+
+  // A revoked/expired session only actually surfaces the next time a request
+  // hits the server (see auth.ts) -- but this app has ~20 scattered fetch()
+  // calls with no shared wrapper, and none of them check for 401 themselves.
+  // Without this, a removed user's dashboard just silently stops updating
+  // instead of clearly redirecting to /login. Patching window.fetch once,
+  // globally, catches every one of those call sites without having to touch
+  // each individually. Scoped to this app's own routes only (relative paths,
+  // or /dashboard-api/*, /api/*) -- NEXT_PUBLIC_API_URL points at a separate
+  // external service (the Cake World backend) whose own 401s, if any, have
+  // nothing to do with this dashboard's session and must not trigger this.
+  useEffect(() => {
+    if (window.__authFetchPatched) return;
+    window.__authFetchPatched = true;
+    const originalFetch = window.fetch;
+    window.fetch = async (...args) => {
+      const response = await originalFetch(...args);
+      if (response.status === 401) {
+        const input = args[0];
+        const url =
+          typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        const isOwnRoute = url.startsWith("/") || url.startsWith(window.location.origin);
+        if (isOwnRoute) {
+          window.location.href = "/login";
+        }
+      }
+      return response;
+    };
+  }, []);
 
   useEffect(() => {
     loadConversations();
