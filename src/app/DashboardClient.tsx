@@ -987,7 +987,7 @@ function mapChatManagerMessage(m: ChatManagerMessage): Message {
                 <p>No quotes are waiting for approval.</p>
               </div>
             ) : (
-              approvals.map((a) => (
+              (Array.isArray(approvals) ? approvals : []).map((a) => (
                 <ApprovalCard
                   key={a.approval_id}
                   approval={a}

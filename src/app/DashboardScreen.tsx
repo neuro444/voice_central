@@ -249,8 +249,9 @@ export default function DashboardScreen({
   }, [api, telephonyApi, chatManagerApi, refreshKey]);
 
   const pendingOrders = orders.filter((order) => order.approval_pending);
+  const approvalList = Array.isArray(approvals) ? approvals : [];
   const needsApproval = [
-    ...approvals.map((approval) => approvalCard(approval, onOpenApprovals)),
+    ...approvalList.map((approval) => approvalCard(approval, onOpenApprovals)),
     ...pendingOrders.map((order) => ({ ...queueCard(order), onApprove: () => onApproveOrder(order.id) })),
   ];
   const approved = orders.filter((order) => order.status === "received" && !order.approval_pending).map(queueCard);
