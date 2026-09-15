@@ -686,6 +686,7 @@ textarea.editable-draft:focus { outline: 2px solid var(--accent); }
 .orders-type-tag { display: inline-flex; align-items: center; padding: 3px 9px; border-radius: 999px; font-size: 10px; font-weight: 600; line-height: 14px; }
 .orders-source-tag.phone { background: #eef4ff; color: #24569b; }
 .orders-source-tag.whatsapp { background: #e9f8ed; color: #21823b; }
+.orders-source-tag.plivo { background: #fdf0e6; color: #b25a1e; }
 .orders-source-tag.unknown { background: #f1f1f3; color: #656469; }
 .orders-type-tag.takeaway { border: 1px solid #e1dfe1; background: #fff; color: #5d3f3c; }
 .orders-type-tag.catering { border: 1px solid rgba(170, 0, 17, 0.18); background: rgba(252, 215, 215, 0.3); color: #aa0011; }

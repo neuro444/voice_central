@@ -8,6 +8,7 @@ import { AnalyticsScreen, MenuScreen } from "./ReferenceScreens";
 const API = process.env.NEXT_PUBLIC_API_URL!;
 const TELEPHONY_API = "/dashboard-api/telephony";
 const CHAT_MANAGER_API = "/dashboard-api/chat-manager";
+const PLIVO_AGENT_API = "/dashboard-api/plivo-agent";
 // Print service base URL. Set NEXT_PUBLIC_PRINT_API_URL to switch targets
 // (https://cakeworld.neuroheart.ai on the VPS, http://localhost:7860 locally).
 // If unset, fall back to same-origin so the button posts to /print/order on
@@ -1038,6 +1039,7 @@ function mapChatManagerMessage(m: ChatManagerMessage): Message {
             api={API}
             telephonyApi={TELEPHONY_API}
             chatManagerApi={CHAT_MANAGER_API}
+            plivoAgentApi={PLIVO_AGENT_API}
             refreshKey={operationsRefreshKey}
             accountMenu={<AccountMenu {...accountMenuProps} compact />}
           />
@@ -1318,6 +1320,7 @@ const kitchenLabels: Record<KitchenOrder["status"], string> = {
 function orderSourceLabel(channel?: string) {
   if (channel === "phone") return "Call";
   if (channel === "whatsapp") return "WhatsApp";
+  if (channel === "plivo") return "Plivo Agent";
   return "Unknown source";
 }
 
@@ -1658,12 +1661,14 @@ function KitchenTab({
   api,
   telephonyApi,
   chatManagerApi,
+  plivoAgentApi,
   refreshKey,
   accountMenu,
 }: {
   api: string;
   telephonyApi: string;
   chatManagerApi: string;
+  plivoAgentApi: string;
   refreshKey: number;
   accountMenu: ReactNode;
 }) {
@@ -1680,10 +1685,12 @@ function KitchenTab({
 
   async function loadOrders() {
     try {
-      const [telephonyResponse, chatResponse, handoffResponse] = await Promise.all([
+      const [telephonyResponse, chatResponse, handoffResponse, plivoResponse, plivoHandoffResponse] = await Promise.all([
         fetch(`${telephonyApi}/orders/recent`),
         fetch(`${chatManagerApi}/orders/recent`),
         fetch(`${telephonyApi}/handoffs/recent`),
+        fetch(`${plivoAgentApi}/orders/recent`),
+        fetch(`${plivoAgentApi}/handoffs/recent`),
       ]);
       const telephonyData: { orders: TelephonyOrderRecord[] } = telephonyResponse.ok
         ? await telephonyResponse.json()
@@ -1691,16 +1698,23 @@ function KitchenTab({
       const chatData: { orders: TelephonyOrderRecord[] } = chatResponse.ok
         ? await chatResponse.json()
         : { orders: [] };
-      if (!telephonyResponse.ok && !chatResponse.ok) return;
+      const plivoData: { orders: TelephonyOrderRecord[] } = plivoResponse.ok
+        ? await plivoResponse.json()
+        : { orders: [] };
+      if (!telephonyResponse.ok && !chatResponse.ok && !plivoResponse.ok) return;
 
       // Phone orders are present in both stores. Prefer telephony's event copy,
       // then add browser/direct-chat orders that have no matching session.
+      // plivo-agent is a separate, independent backend (not a dual-write with
+      // chat-manager or telephony), so its orders need no session_id dedup --
+      // just append them.
       const phoneSessionIds = new Set(
         telephonyData.orders.map((record) => record.session_id).filter(Boolean)
       );
       const merged = [
         ...telephonyData.orders,
         ...chatData.orders.filter((record) => !phoneSessionIds.has(record.session_id)),
+        ...plivoData.orders,
       ].sort((a, b) => b.emitted_at.localeCompare(a.emitted_at));
       const next = merged
         .map(mapTelephonyOrderToKitchenOrder)
@@ -1708,7 +1722,10 @@ function KitchenTab({
       const handoffData: { handoffs?: TelephonyOrderRecord[] } = handoffResponse.ok
         ? await handoffResponse.json()
         : { handoffs: [] };
-      const cateringOrders = (handoffData.handoffs || [])
+      const plivoHandoffData: { handoffs?: TelephonyOrderRecord[] } = plivoHandoffResponse.ok
+        ? await plivoHandoffResponse.json()
+        : { handoffs: [] };
+      const cateringOrders = [...(handoffData.handoffs || []), ...(plivoHandoffData.handoffs || [])]
         .map(mapHandoffToKitchenOrder)
         .filter((order): order is KitchenOrder => order !== null);
       const allOrders = [...next, ...cateringOrders];
@@ -1781,7 +1798,7 @@ function KitchenTab({
     loadOrders();
     const interval = setInterval(loadOrders, 10000);
     return () => clearInterval(interval);
-  }, [api, telephonyApi, chatManagerApi]);
+  }, [api, telephonyApi, chatManagerApi, plivoAgentApi]);
 
   useEffect(() => {
     loadOrders();
