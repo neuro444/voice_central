@@ -501,6 +501,75 @@ function mapSessionToConversation(session: ChatManagerSession, caller: ChatManag
   };
 }
 
+interface PlivoAgentCaller {
+  user_id: string;
+  name: string | null;
+  last_activity: string;
+}
+
+interface PlivoAgentSession {
+  session_id: string;
+  created_at: string;
+  updated_at: string;
+  ended_at: string | null;
+  state: string | null;
+  summary: string | null;
+  completed_order: boolean;
+  completed_request: boolean;
+}
+
+interface PlivoAgentMessages {
+  session_id: string;
+  partial: boolean;
+  messages: { role: string; content: string; created_at: string }[];
+  transcript: string | null;
+  summary: string | null;
+}
+
+// One plivo-agent session (+ its caller) -> one Conversation. channel stays
+// "phone" (this is still a phone call, just a different backend than
+// chat_manager) -- see ConversationsScreen's normalizedChannel, which
+// already treats anything but whatsapp/sms as phone.
+function mapPlivoSessionToConversation(
+  session: PlivoAgentSession,
+  caller: PlivoAgentCaller
+): Conversation {
+  return {
+    id: session.session_id,
+    phone: caller.user_id,
+    name: caller.name || "Unknown caller",
+    intent: "",
+    state: "done",
+    channel: "phone",
+    last_message: session.summary || "",
+    last_message_at: session.updated_at,
+  };
+}
+
+// plivo-agent's /sessions/{id}/messages has no per-turn transcript yet
+// (partial: true, messages: []) -- render whatever it has (call summary or
+// raw transcript string) as a single message rather than an empty pane.
+function mapPlivoMessages(data: PlivoAgentMessages): Message[] {
+  if (data.messages.length > 0) {
+    return data.messages.map((m, i) => ({
+      id: String(i),
+      direction: m.role === "user" ? "inbound" : "outbound",
+      body: m.content,
+      media_type: "text",
+      created_at: m.created_at,
+    }));
+  }
+  const fallback = data.transcript || data.summary;
+  if (!fallback) return [];
+  return [{
+    id: "summary",
+    direction: "outbound",
+    body: fallback,
+    media_type: "text",
+    created_at: "",
+  }];
+}
+
 function mapChatManagerMessage(m: ChatManagerMessage): Message {
   return {
     id: String(m.seq),
@@ -511,13 +580,10 @@ function mapChatManagerMessage(m: ChatManagerMessage): Message {
   };
 }
 
-  async function loadConversations() {
-    // Phone conversations come from chat_manager's real /callers + /sessions.
-    // WhatsApp still points at the old dead endpoint -- a pre-existing gap,
-    // not something this pass fixes, so it stays empty rather than faked.
+  async function loadChatManagerConversations(): Promise<Conversation[]> {
     try {
       const callersRes = await fetch(`${CHAT_MANAGER_API}/callers`);
-      if (!callersRes.ok) return;
+      if (!callersRes.ok) return [];
       const callers: ChatManagerCaller[] = await callersRes.json();
       const sessionLists = await Promise.all(
         callers.map((caller) =>
@@ -529,7 +595,52 @@ function mapChatManagerMessage(m: ChatManagerMessage): Message {
             .catch(() => [])
         )
       );
-      const data = sessionLists.flat();
+      return sessionLists.flat();
+    } catch {
+      return [];
+    }
+  }
+
+  // plivo-agent's own /callers + /sessions -- same contract shape as
+  // chat_manager's, additive/independent backend (see plivo_agent_plan.md
+  // Phase E). A down/misconfigured provider must not break chat_manager's
+  // own conversations, so failures here resolve to an empty list, not a throw.
+  async function loadPlivoAgentConversations(): Promise<Conversation[]> {
+    try {
+      const callersRes = await fetch(`${PLIVO_AGENT_API}/callers`);
+      if (!callersRes.ok) return [];
+      const { callers }: { callers: PlivoAgentCaller[] } = await callersRes.json();
+      const sessionLists = await Promise.all(
+        callers.map((caller) =>
+          fetch(`${PLIVO_AGENT_API}/sessions?user_id=${encodeURIComponent(caller.user_id)}`)
+            .then((r) => (r.ok ? r.json() : { sessions: [] }))
+            .then(({ sessions }: { sessions: PlivoAgentSession[] }) =>
+              sessions.map((s) => mapPlivoSessionToConversation(s, caller))
+            )
+            .catch(() => [])
+        )
+      );
+      return sessionLists.flat();
+    } catch {
+      return [];
+    }
+  }
+
+  async function loadConversations() {
+    // Phone conversations come from both chat_manager's own /callers +
+    // /sessions and plivo-agent's independent backend (see
+    // plivo_agent_plan.md Phase E) -- merged into one list. WhatsApp still
+    // points at the old dead endpoint -- a pre-existing gap, not something
+    // this pass fixes, so it stays empty rather than faked.
+    try {
+      const [chatManagerData, plivoData] = await Promise.all([
+        loadChatManagerConversations(),
+        loadPlivoAgentConversations(),
+      ]);
+      if (chatManagerData.length === 0 && plivoData.length === 0) return;
+      const data = [...chatManagerData, ...plivoData].sort(
+        (a, b) => (b.last_message_at || "").localeCompare(a.last_message_at || "")
+      );
       setConversations(data);
       setSelectedConv((current) =>
         current ? data.find((c: Conversation) => c.id === current.id) || current : current
@@ -543,6 +654,10 @@ function mapChatManagerMessage(m: ChatManagerMessage): Message {
     } catch { /* retain last successful data during outages */ }
   }
   async function loadMessages(convId: string, phone: string) {
+    // A session id belongs to exactly one backend (chat_manager or
+    // plivo-agent) -- neither exposes a lookup to tell which, so try
+    // chat_manager first (existing behavior, unchanged for its own
+    // sessions) and fall back to plivo-agent only on a miss.
     try {
       const r = await fetch(
         `${CHAT_MANAGER_API}/sessions/${convId}/messages?user_id=${encodeURIComponent(phone)}`
@@ -550,6 +665,15 @@ function mapChatManagerMessage(m: ChatManagerMessage): Message {
       if (r.ok) {
         const raw: ChatManagerMessage[] = await r.json();
         setMessages(raw.map(mapChatManagerMessage));
+        return;
+      }
+    } catch { /* fall through to plivo-agent */ }
+
+    try {
+      const r = await fetch(`${PLIVO_AGENT_API}/sessions/${convId}/messages`);
+      if (r.ok) {
+        const data: PlivoAgentMessages = await r.json();
+        setMessages(mapPlivoMessages(data));
       }
     } catch { /* retain last successful data during outages */ }
   }
@@ -729,27 +853,19 @@ function mapChatManagerMessage(m: ChatManagerMessage): Message {
     }
   }
 
-  // A revoked/expired session only actually surfaces the next time a request
-  // hits the server (see auth.ts) -- but this app has ~20 scattered fetch()
-  // calls with no shared wrapper, and none of them check for 401 themselves.
-  // Without this, a removed user's dashboard just silently stops updating
-  // instead of clearly redirecting to /login. Patching window.fetch once,
-  // globally, catches every one of those call sites without having to touch
-  // each individually. Scoped to this app's own routes only (relative paths,
-  // or /dashboard-api/*, /api/*) -- NEXT_PUBLIC_API_URL points at a separate
-  // external service (the Cake World backend) whose own 401s, if any, have
-  // nothing to do with this dashboard's session and must not trigger this.
+  // Redirect only for an explicitly rejected dashboard session. Backend API
+  // authentication failures must not cause dashboard/login redirect loops.
   useEffect(() => {
     if (window.__authFetchPatched) return;
     window.__authFetchPatched = true;
     const originalFetch = window.fetch;
     window.fetch = async (...args) => {
       const response = await originalFetch(...args);
-      if (response.status === 401) {
+      if (response.status === 401 && response.headers.get("X-Dashboard-Session") === "invalid") {
         const input = args[0];
         const url =
           typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-        const isOwnRoute = url.startsWith("/") || url.startsWith(window.location.origin);
+        const isOwnRoute = new URL(url, window.location.origin).origin === window.location.origin;
         if (isOwnRoute) {
           window.location.href = "/login";
         }

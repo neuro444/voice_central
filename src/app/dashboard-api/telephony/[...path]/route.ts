@@ -19,7 +19,7 @@ export async function GET(
   const token = request.cookies.get(SESSION_COOKIE)?.value;
   const session = await verifyAndDecodeSessionToken(token);
   if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: { "X-Dashboard-Session": "invalid" } });
   }
 
   const { path: segments } = await context.params;
@@ -55,6 +55,13 @@ export async function GET(
       upstream: "telephony",
       status: upstream.status,
     });
+    if (upstream.status === 401 || upstream.status === 403) {
+      console.error("Dashboard upstream authentication failed", { path, status: upstream.status });
+      return NextResponse.json(
+        { error: "Backend authentication failed; contact the administrator" },
+        { status: 502 }
+      );
+    }
     return new NextResponse(await upstream.arrayBuffer(), {
       status: upstream.status,
       headers: {
