@@ -6,11 +6,20 @@ import { writeAuditLog } from "@/lib/audit";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const ALLOWED_ROUTES = new Set([
-  "orders/recent",
-  "handoffs/recent",
-  "cost/calls",
-]);
+const ALLOWED_ROUTES = [
+  /^orders\/recent$/,
+  /^handoffs\/recent$/,
+  /^cost\/calls$/,
+  /^callers$/,
+  /^sessions$/,
+  /^sessions\/[A-Za-z0-9_-]+\/(?:messages|debug)$/,
+  /^menu$/,
+  /^crm\/customers$/,
+];
+
+function allowed(path: string): boolean {
+  return ALLOWED_ROUTES.some((pattern) => pattern.test(path));
+}
 
 export async function GET(
   request: NextRequest,
@@ -24,7 +33,7 @@ export async function GET(
 
   const { path: segments } = await context.params;
   const path = segments.join("/");
-  if (!ALLOWED_ROUTES.has(path)) {
+  if (!allowed(path)) {
     return NextResponse.json({ error: "Unsupported Telephony route" }, { status: 404 });
   }
 
