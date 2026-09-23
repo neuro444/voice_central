@@ -54,6 +54,9 @@ type MenuResponse = {
     price_count: number;
   };
 };
+type PlivoMenuResponse = {
+  items: Array<{ name: string; price: string | number }>;
+};
 type FieldMeta = {
   source: MenuSource;
   itemId: string;
@@ -71,6 +74,25 @@ const emptyMenu: MenuResponse = {
   catering: { sections: [], category_count: 0, item_count: 0 },
   cakes: { classes: [], class_count: 0, flavor_count: 0, price_count: 0 },
 };
+
+function normalizeMenuResponse(data: MenuResponse | PlivoMenuResponse): MenuResponse {
+  if (!("items" in data)) return data;
+  const items = data.items.map((item, index) => ({
+    id: `plivo-${index}`,
+    category: "pickup",
+    name: item.name,
+    price: Number(item.price).toFixed(2),
+  }));
+  return {
+    takeaway: {
+      sections: [{ name: "pickup", label: "Pickup Menu", items }],
+      category_count: items.length ? 1 : 0,
+      item_count: items.length,
+    },
+    catering: { sections: [], category_count: 0, item_count: 0 },
+    cakes: { classes: [], class_count: 0, flavor_count: 0, price_count: 0 },
+  };
+}
 
 const menuFieldId = (source: MenuSource, itemId: string, key: MenuPriceKey) =>
   `${source}::${itemId}::${key}`;
@@ -118,7 +140,8 @@ export function MenuScreen({ api }: { api: string }) {
     setLoading(true);
     setError("");
     try {
-      const data = await requestJson<MenuResponse>(`${api}/menu`);
+      const raw = await requestJson<MenuResponse | PlivoMenuResponse>(`${api}/menu`);
+      const data = normalizeMenuResponse(raw);
       const nextOriginals: Record<string, string> = {};
       const nextMeta: Record<string, FieldMeta> = {};
       const nextQuantities: Record<string, string> = {};
@@ -172,7 +195,7 @@ export function MenuScreen({ api }: { api: string }) {
       setCateringSizes(nextCateringSizes);
       setCakePreviews(nextCakePreviews);
     } catch {
-      setError("The pickup menu could not be loaded from Chat Manager. Please try again.");
+      setError("The pickup menu could not be loaded from the Plivo agent. Please try again.");
     } finally {
       setLoading(false);
     }

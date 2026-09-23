@@ -154,6 +154,15 @@ interface CrmCustomer {
   }>;
 }
 
+interface PlivoCrmCustomer {
+  user_id: string;
+  name?: string | null;
+  order_count: number;
+  total_spent: number;
+  last_activity: string;
+  history?: CrmCustomer["history"];
+}
+
 interface StatusResponse {
   status: string;
   evolution_instance: string;
@@ -1043,8 +1052,8 @@ function mapChatManagerMessage(m: ChatManagerMessage): Message {
           />
         )}
         {tab === "kanban" && <ManagerKanbanTab api={API} refreshKey={operationsRefreshKey} />}
-        {tab === "customers" && <CustomersTab api={CHAT_MANAGER_API} />}
-        {tab === "menu" && <MenuScreen api={CHAT_MANAGER_API} />}
+        {tab === "customers" && <CustomersTab api={TELEPHONY_API} />}
+        {tab === "menu" && <MenuScreen api={TELEPHONY_API} />}
         {tab === "analytics" && <AnalyticsScreen api={API} refreshKey={operationsRefreshKey} />}
         {tab === "settings" && <SettingsTab restaurant={restaurant} />}
       </main>
@@ -1564,6 +1573,7 @@ interface TelephonyOrderRecord {
   name?: string;
   channel?: string;
   approval_pending?: boolean;
+  summary?: string;
   order: {
     customer_name?: string;
     fulfillment?: string;
@@ -1572,6 +1582,9 @@ interface TelephonyOrderRecord {
     tax?: string | number;
     total?: string | number;
     preparation_minutes?: string;
+    contact_phone?: string;
+    request_type?: string;
+    summary?: string;
   } | null;
 }
 
@@ -1640,10 +1653,10 @@ function mapHandoffToKitchenOrder(record: TelephonyOrderRecord): KitchenOrder | 
     id: record.call_uuid,
     order_number: record.call_uuid.slice(0, 8).toUpperCase(),
     customer_name: record.name || "Manager callback",
-    customer_phone: record.user_id || "",
+    customer_phone: record.order?.contact_phone || record.user_id || "",
     order_type: "catering",
     channel: record.channel || "phone",
-    items: [],
+    items: [{ name: record.order?.summary || record.summary || `${titleCase(record.order_type)} manager callback`, quantity: 1, qty: 1 }],
     pickup_time: "",
     estimated_total: null,
     subtotal: null,
@@ -2046,7 +2059,24 @@ function CustomersTab({ api }: { api: string }) {
   async function loadCustomers() {
     try {
       const r = await fetch(`${api}/crm/customers`);
-      if (r.ok) setCustomers(await r.json());
+      if (r.ok) {
+        const payload: CrmCustomer[] | { customers: PlivoCrmCustomer[] } = await r.json();
+        if (Array.isArray(payload)) {
+          setCustomers(payload);
+        } else {
+          setCustomers((payload.customers || []).map((customer) => ({
+            id: customer.user_id,
+            name: customer.name || "Unknown customer",
+            phone: customer.user_id,
+            orders: customer.order_count,
+            spend: customer.total_spent,
+            last_order: customer.last_activity,
+            diet: "",
+            address: "",
+            history: customer.history || [],
+          })));
+        }
+      }
     } catch { /* retain last successful data during outages */ }
   }
 
