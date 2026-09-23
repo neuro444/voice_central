@@ -14,6 +14,9 @@ const ALLOWED_ROUTES = [
   /^sessions$/,
   /^sessions\/[A-Za-z0-9_-]+\/(?:messages|debug)$/,
   /^menu$/,
+  /^menu\/prompt$/,
+  /^menu\/items$/,
+  /^menu\/items\/\d+$/,
   /^crm\/customers$/,
 ];
 
@@ -21,9 +24,10 @@ function allowed(path: string): boolean {
   return ALLOWED_ROUTES.some((pattern) => pattern.test(path));
 }
 
-export async function GET(
+async function proxy(
   request: NextRequest,
-  context: { params: Promise<{ path: string[] }> }
+  context: { params: Promise<{ path: string[] }> },
+  method: "GET" | "POST" | "PUT" | "DELETE",
 ) {
   const token = request.cookies.get(SESSION_COOKIE)?.value;
   const session = await verifyAndDecodeSessionToken(token);
@@ -52,14 +56,21 @@ export async function GET(
   });
 
   try {
+    const body = method === "GET" || method === "DELETE"
+      ? undefined
+      : await request.arrayBuffer();
+    const headers: Record<string, string> = { "X-API-Key": apiKey };
+    if (body) headers["Content-Type"] = request.headers.get("content-type") || "application/json";
     const upstream = await fetch(upstreamUrl, {
-      headers: { "X-API-Key": apiKey },
+      method,
+      headers,
+      body,
       cache: "no-store",
     });
     writeAuditLog({
       timestamp: new Date().toISOString(),
       staff: session.sub,
-      method: "GET",
+      method,
       path,
       upstream: "telephony",
       status: upstream.status,
@@ -74,4 +85,22 @@ export async function GET(
   } catch {
     return NextResponse.json({ error: "Telephony is unavailable" }, { status: 502 });
   }
+}
+
+type RouteContext = { params: Promise<{ path: string[] }> };
+
+export async function GET(request: NextRequest, context: RouteContext) {
+  return proxy(request, context, "GET");
+}
+
+export async function POST(request: NextRequest, context: RouteContext) {
+  return proxy(request, context, "POST");
+}
+
+export async function PUT(request: NextRequest, context: RouteContext) {
+  return proxy(request, context, "PUT");
+}
+
+export async function DELETE(request: NextRequest, context: RouteContext) {
+  return proxy(request, context, "DELETE");
 }
