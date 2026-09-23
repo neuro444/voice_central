@@ -55,7 +55,7 @@ type MenuResponse = {
   };
 };
 type PlivoMenuResponse = {
-  items: Array<{ name: string; price: string | number }>;
+  items: Array<{ id?: string | number; name: string; price: string | number }>;
 };
 type FieldMeta = {
   source: MenuSource;
@@ -78,7 +78,7 @@ const emptyMenu: MenuResponse = {
 function normalizeMenuResponse(data: MenuResponse | PlivoMenuResponse): MenuResponse {
   if (!("items" in data)) return data;
   const items = data.items.map((item, index) => ({
-    id: `plivo-${index}`,
+    id: String(item.id ?? index),
     category: "pickup",
     name: item.name,
     price: Number(item.price).toFixed(2),
@@ -125,6 +125,8 @@ export function MenuScreen({ api }: { api: string }) {
   const [menu, setMenu] = useState<MenuResponse>(emptyMenu);
   const [originals, setOriginals] = useState<Record<string, string>>({});
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [originalNames, setOriginalNames] = useState<Record<string, string>>({});
+  const [nameDrafts, setNameDrafts] = useState<Record<string, string>>({});
   const [fieldMeta, setFieldMeta] = useState<Record<string, FieldMeta>>({});
   const [quantities, setQuantities] = useState<Record<string, string>>({});
   const [cateringSizes, setCateringSizes] = useState<Record<string, MenuPriceKey>>({});
@@ -135,6 +137,9 @@ export function MenuScreen({ api }: { api: string }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [newItemName, setNewItemName] = useState("");
+  const [newItemPrice, setNewItemPrice] = useState("");
 
   const loadMenu = useCallback(async () => {
     setLoading(true);
@@ -143,12 +148,14 @@ export function MenuScreen({ api }: { api: string }) {
       const raw = await requestJson<MenuResponse | PlivoMenuResponse>(`${api}/menu`);
       const data = normalizeMenuResponse(raw);
       const nextOriginals: Record<string, string> = {};
+      const nextOriginalNames: Record<string, string> = {};
       const nextMeta: Record<string, FieldMeta> = {};
       const nextQuantities: Record<string, string> = {};
       const nextCateringSizes: Record<string, MenuPriceKey> = {};
       const nextCakePreviews: Record<string, CakePreview> = {};
 
       data.takeaway.sections.forEach((section) => section.items.forEach((item) => {
+        nextOriginalNames[item.id] = item.name;
         if (item.price != null) {
           const id = menuFieldId("takeaway", item.id, "price");
           nextOriginals[id] = item.price;
@@ -190,6 +197,8 @@ export function MenuScreen({ api }: { api: string }) {
       setMenu(data);
       setOriginals(nextOriginals);
       setDrafts(nextOriginals);
+      setOriginalNames(nextOriginalNames);
+      setNameDrafts(nextOriginalNames);
       setFieldMeta(nextMeta);
       setQuantities(nextQuantities);
       setCateringSizes(nextCateringSizes);
@@ -234,6 +243,15 @@ export function MenuScreen({ api }: { api: string }) {
   [menu.cakes.classes, normalizedQuery]);
 
   const changedFields = Object.keys(drafts).filter((key) => drafts[key] !== originals[key]);
+  const changedNames = Object.keys(nameDrafts).filter(
+    (key) => nameDrafts[key].trim() !== (originalNames[key] || "")
+  );
+  const changedItemIds = Array.from(new Set<string>([
+    ...changedFields
+      .map((fieldId) => fieldMeta[fieldId]?.itemId)
+      .filter((itemId): itemId is string => Boolean(itemId)),
+    ...changedNames,
+  ]));
   const validatePrice = (value: string) => {
     if (!value.trim()) return "Required";
     if (!/^\d+(?:\.\d+)?$/.test(value.trim())) return "Enter a non-negative number";
@@ -256,51 +274,98 @@ export function MenuScreen({ api }: { api: string }) {
 
   function discard() {
     setDrafts(originals);
+    setNameDrafts(originalNames);
     setError("");
     setSuccess("");
   }
 
   async function save() {
-    if (changedFields.length === 0) return;
+    if (changedItemIds.length === 0) return;
     if (invalidFields.length > 0 || invalidQuantities.length > 0) {
       setSuccess("");
       setError("Fix the highlighted prices and quantities before saving.");
       return;
     }
-    const updates = new Map<string, {
-      source: MenuSource;
-      item_id: string;
-      prices: Record<string, string>;
-    }>();
-    changedFields.forEach((fieldId) => {
-      const meta = fieldMeta[fieldId];
-      if (!meta) return;
-      const updateId = `${meta.source}::${meta.itemId}`;
-      const existing = updates.get(updateId) || {
-        source: meta.source,
-        item_id: meta.itemId,
-        prices: {},
-      };
-      existing.prices[meta.key] = drafts[fieldId].trim();
-      updates.set(updateId, existing);
-    });
+    const blankName = changedItemIds.find((itemId) => !nameDrafts[itemId]?.trim());
+    if (blankName) {
+      setError("Every menu item needs a name.");
+      return;
+    }
     setSaving(true);
     setError("");
     setSuccess("");
     try {
-      const response = await fetch(`${api}/api/menu/prices`, {
-        method: "PUT",
+      await Promise.all(changedItemIds.map(async (itemId) => {
+        const priceId = menuFieldId("takeaway", itemId, "price");
+        const response = await fetch(`${api}/menu/items/${itemId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: nameDrafts[itemId].trim(),
+            price: drafts[priceId].trim(),
+          }),
+        });
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({}));
+          throw new Error(body.detail || `Save failed (${response.status})`);
+        }
+      }));
+      await loadMenu();
+      setSuccess("Menu changes saved to the live database and reloaded.");
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Menu prices could not be saved.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function addItem() {
+    const name = newItemName.trim();
+    const priceError = validatePrice(newItemPrice);
+    if (!name || priceError) {
+      setError(!name ? "Enter an item name." : priceError);
+      return;
+    }
+    setSaving(true);
+    setError("");
+    setSuccess("");
+    try {
+      const response = await fetch(`${api}/menu/items`, {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ items: Array.from(updates.values()) }),
+        body: JSON.stringify({ name, price: newItemPrice.trim() }),
       });
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
-        throw new Error(body.detail || `Save failed (${response.status})`);
+        throw new Error(body.detail || `Add failed (${response.status})`);
+      }
+      setNewItemName("");
+      setNewItemPrice("");
+      setAdding(false);
+      await loadMenu();
+      setSuccess(`${name} was added to the live menu.`);
+    } catch (addError) {
+      setError(addError instanceof Error ? addError.message : "The menu item could not be added.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteItem(item: TakeawayMenuItem) {
+    if (!window.confirm(`Delete ${item.name} from the live pickup menu?`)) return;
+    setSaving(true);
+    setError("");
+    setSuccess("");
+    try {
+      const response = await fetch(`${api}/menu/items/${item.id}`, { method: "DELETE" });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.detail || `Delete failed (${response.status})`);
       }
       await loadMenu();
-      setSuccess("Menu prices saved, reloaded, and synced to the assistant.");
-    } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "Menu prices could not be saved.");
+      setSuccess(`${item.name} was removed from the live menu.`);
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "The menu item could not be deleted.");
     } finally {
       setSaving(false);
     }
@@ -323,10 +388,14 @@ export function MenuScreen({ api }: { api: string }) {
         <input
           type="text"
           inputMode="decimal"
-          readOnly
           aria-label={`${itemName} ${label || "price"}`}
           aria-invalid={!!validation}
           value={drafts[id]}
+          onChange={(event) => {
+            setDrafts((current) => ({ ...current, [id]: event.target.value }));
+            setError("");
+            setSuccess("");
+          }}
         />
         {changed && <i className="menu-dirty-dot" aria-label="Unsaved change" />}
         {validation && <small className="menu-price-error">{validation}</small>}
@@ -385,13 +454,33 @@ export function MenuScreen({ api }: { api: string }) {
                 return (
                   <div className="catering-menu-item menu-item-with-preview" key={item.id}>
                     <span className="menu-drag-handle" aria-hidden="true">⠿</span>
-                    <strong className="catering-menu-item-name">{item.name}</strong>
+                    <div className="menu-name-editor">
+                      <span>Item name</span>
+                      <input
+                        aria-label={`${item.name} item name`}
+                        value={nameDrafts[item.id] ?? item.name}
+                        onChange={(event) => {
+                          setNameDrafts((current) => ({ ...current, [item.id]: event.target.value }));
+                          setError("");
+                          setSuccess("");
+                        }}
+                      />
+                    </div>
                     <div className="menu-price-fields">
                       {priceEditor("takeaway", item.id, item.name, "price", "Unit price")}
                     </div>
                     <div className="menu-preview-controls">
                       {quantityEditor("takeaway", item.id, item.name)}
                       <span className="menu-item-total"><small>Item total</small><strong>{previewTotal(drafts[priceId], quantity)}</strong></span>
+                      <button
+                        className="menu-delete-button"
+                        type="button"
+                        disabled={saving}
+                        onClick={() => void deleteItem(item)}
+                        aria-label={`Delete ${item.name}`}
+                      >
+                        Delete
+                      </button>
                     </div>
                   </div>
                 );
@@ -606,17 +695,39 @@ export function MenuScreen({ api }: { api: string }) {
       </div>
       <div className="menu-action-row">
         <label className="reference-search"><span>⌕</span><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={searchLabel} /></label>
+        <button className="menu-add-button" type="button" onClick={() => setAdding((value) => !value)}>
+          {adding ? "Cancel" : "+ Add item"}
+        </button>
       </div>
       <div className="menu-state-message" role="note">Cake and catering requests are handled by the manager and are intentionally not listed as orderable menus.</div>
       {error && <div className="menu-state-message error" role="alert">{error}</div>}
       {success && <div className="menu-state-message success" role="status">{success}</div>}
+      {adding && (
+        <section className="menu-add-panel" aria-label="Add pickup menu item">
+          <label>
+            <span>Item name</span>
+            <input value={newItemName} onChange={(event) => setNewItemName(event.target.value)} placeholder="Example: Weekend Special" />
+          </label>
+          <label>
+            <span>Unit price</span>
+            <input inputMode="decimal" value={newItemPrice} onChange={(event) => setNewItemPrice(event.target.value)} placeholder="0.00" />
+          </label>
+          <button type="button" disabled={saving} onClick={() => void addItem()}>{saving ? "Adding…" : "Add to live menu"}</button>
+        </section>
+      )}
       {loading
         ? <div className="reference-empty"><strong>Loading the pickup menu…</strong></div>
         : renderTakeaway()}
       <footer className="menu-unsaved-bar">
-        <span className="menu-change-count">Read only</span>
-        <p className="menu-unsaved-copy">This is the pickup menu currently used by the AI assistant.</p>
+        <span className="menu-change-count">{changedItemIds.length} unsaved</span>
+        <p className="menu-unsaved-copy">Saved changes update the live menu database and order validation.</p>
         <span className="menu-loaded-count">{activeCount} loaded</span>
+        <div className="menu-unsaved-actions">
+          <button type="button" disabled={saving || changedItemIds.length === 0} onClick={discard}>Discard</button>
+          <button className="menu-save-button" type="button" disabled={saving || changedItemIds.length === 0} onClick={() => void save()}>
+            {saving ? "Saving…" : "Save menu changes"}
+          </button>
+        </div>
       </footer>
     </div>
   );
