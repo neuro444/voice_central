@@ -539,16 +539,30 @@ function mapChatManagerMessage(m: ChatManagerMessage): Message {
         )
       );
       const data = sessionLists.flat();
-      setConversations(data);
+      setConversations((current) =>
+        JSON.stringify(current) === JSON.stringify(data) ? current : data
+      );
       setSelectedConv((current) =>
-        current ? data.find((c: Conversation) => c.id === current.id) || current : current
+        current
+          ? (() => {
+              const next = data.find((c: Conversation) => c.id === current.id);
+              return next && JSON.stringify(next) !== JSON.stringify(current) ? next : current;
+            })()
+          : current
       );
     } catch { /* retain last successful data during outages */ }
   }
   async function loadApprovals() {
     try {
       const r = await fetch(`${API}/api/approvals`);
-      if (r.ok) setApprovals(await r.json());
+      if (r.ok) {
+        const data: unknown = await r.json();
+        if (Array.isArray(data)) {
+          setApprovals((current) =>
+            JSON.stringify(current) === JSON.stringify(data) ? current : data
+          );
+        }
+      }
     } catch { /* retain last successful data during outages */ }
   }
   async function loadMessages(convId: string, phone: string) {
@@ -569,7 +583,10 @@ function mapChatManagerMessage(m: ChatManagerMessage): Message {
         const d: StatusResponse = await r.json();
         setEvoStatus(d.evolution_instance || "unknown");
         setAutoRepliesEnabled(d.auto_replies_enabled !== false);
-        setRestaurant(d.restaurant || null);
+        setRestaurant((current) => {
+          const next = d.restaurant || null;
+          return JSON.stringify(current) === JSON.stringify(next) ? current : next;
+        });
         setStatusLoaded(true);
       }
     } catch {
@@ -768,15 +785,19 @@ function mapChatManagerMessage(m: ChatManagerMessage): Message {
   }, []);
 
   useEffect(() => {
-    loadConversations();
-    loadApprovals();
-    loadStatus();
+    let inFlight = false;
+    const refreshLiveData = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        await Promise.allSettled([loadConversations(), loadApprovals(), loadStatus()]);
+      } finally {
+        inFlight = false;
+      }
+    };
+    void refreshLiveData();
     loadMockupStatus();
-    const interval = setInterval(() => {
-      loadConversations();
-      loadApprovals();
-      loadStatus();
-    }, 10000);
+    const interval = setInterval(refreshLiveData, 10000);
     return () => clearInterval(interval);
   }, []);
 

@@ -186,7 +186,23 @@ export default function DashboardScreen({
 
   useEffect(() => {
     let active = true;
+    let inFlight = false;
+    let telephonyOrders: CompletedOrderRecord[] = [];
+    let chatOrders: CompletedOrderRecord[] = [];
+    let ordersSignature = "";
+    let approvalsSignature = "";
+
+    function validOrderPayload(value: unknown): value is { orders: CompletedOrderRecord[] } {
+      return Boolean(
+        value &&
+        typeof value === "object" &&
+        Array.isArray((value as { orders?: unknown }).orders)
+      );
+    }
+
     async function loadDashboardData() {
+      if (inFlight) return;
+      inFlight = true;
       try {
         const [telephonyResponse, chatResponse, approvalsResponse] = await Promise.all([
           fetch(`${telephonyApi}/orders/recent`).catch(() => null),
@@ -194,21 +210,34 @@ export default function DashboardScreen({
           fetch(`${api}/api/approvals`).catch(() => null),
         ]);
         if (!active) return;
-        const telephonyData: { orders: CompletedOrderRecord[] } = telephonyResponse?.ok
-          ? await telephonyResponse.json()
-          : { orders: [] };
-        const chatData: { orders: CompletedOrderRecord[] } = chatResponse?.ok
-          ? await chatResponse.json()
-          : { orders: [] };
-        if (telephonyResponse?.ok || chatResponse?.ok) {
+        let orderSourceUpdated = false;
+
+        if (telephonyResponse?.ok) {
+          const data: unknown = await telephonyResponse.json().catch(() => null);
+          if (validOrderPayload(data)) {
+            telephonyOrders = data.orders;
+            orderSourceUpdated = true;
+          }
+        }
+        if (chatResponse?.ok) {
+          const data: unknown = await chatResponse.json().catch(() => null);
+          if (validOrderPayload(data)) {
+            chatOrders = data.orders;
+            orderSourceUpdated = true;
+          }
+        }
+
+        // Each upstream is cached independently. A temporary failure from one
+        // provider must not erase the last successful orders from that source.
+        if (orderSourceUpdated) {
           const phoneSessionIds = new Set(
-            telephonyData.orders.map((record) => record.session_id).filter(Boolean)
+            telephonyOrders.map((record) => record.session_id).filter(Boolean)
           );
           const merged = [
-            ...telephonyData.orders,
-            ...chatData.orders.filter((record) => !phoneSessionIds.has(record.session_id)),
+            ...telephonyOrders,
+            ...chatOrders.filter((record) => !phoneSessionIds.has(record.session_id)),
           ].sort((a, b) => b.emitted_at.localeCompare(a.emitted_at));
-          setOrders(merged.flatMap((record) => {
+          const nextOrders = merged.flatMap((record) => {
             if (!record.order) return [];
             const numberValue = (value: string | number | undefined) => {
               if (value == null || value === "") return null;
@@ -228,11 +257,27 @@ export default function DashboardScreen({
               approval_pending: Boolean(record.approval_pending),
               created_at: record.emitted_at,
             }];
-          }));
+          });
+          const signature = JSON.stringify(nextOrders);
+          if (signature !== ordersSignature) {
+            ordersSignature = signature;
+            setOrders(nextOrders);
+          }
         }
-        if (approvalsResponse?.ok) setApprovals(await approvalsResponse.json());
+        if (approvalsResponse?.ok) {
+          const data: unknown = await approvalsResponse.json();
+          if (Array.isArray(data)) {
+            const signature = JSON.stringify(data);
+            if (signature !== approvalsSignature) {
+              approvalsSignature = signature;
+              setApprovals(data);
+            }
+          }
+        }
       } catch {
         // Preserve the last successful view while the backend is temporarily unavailable.
+      } finally {
+        inFlight = false;
       }
     }
     void loadDashboardData();
@@ -240,9 +285,10 @@ export default function DashboardScreen({
     return () => { active = false; window.clearInterval(interval); };
   }, [api, telephonyApi, chatManagerApi, refreshKey]);
 
+  const approvalList = Array.isArray(approvals) ? approvals : [];
   const needsApproval = [
     ...orders.filter((order) => order.approval_pending).map(queueCard),
-    ...approvals.map((approval) => approvalCard(approval, onOpenApprovals)),
+    ...approvalList.map((approval) => approvalCard(approval, onOpenApprovals)),
   ];
   const approved = orders.filter((order) => order.status === "received" && !order.approval_pending).map(queueCard);
   const preparing = orders.filter((order) => order.status === "preparing").map(queueCard);
