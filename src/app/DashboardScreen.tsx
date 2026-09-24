@@ -189,18 +189,18 @@ export default function DashboardScreen({
     async function loadDashboardData() {
       try {
         const [telephonyResponse, chatResponse, approvalsResponse] = await Promise.all([
-          fetch(`${telephonyApi}/orders/recent`),
-          fetch(`${chatManagerApi}/orders/recent`),
-          fetch(`${api}/api/approvals`),
+          fetch(`${telephonyApi}/orders/recent`).catch(() => null),
+          fetch(`${chatManagerApi}/orders/recent`).catch(() => null),
+          fetch(`${api}/api/approvals`).catch(() => null),
         ]);
         if (!active) return;
-        const telephonyData: { orders: CompletedOrderRecord[] } = telephonyResponse.ok
+        const telephonyData: { orders: CompletedOrderRecord[] } = telephonyResponse?.ok
           ? await telephonyResponse.json()
           : { orders: [] };
-        const chatData: { orders: CompletedOrderRecord[] } = chatResponse.ok
+        const chatData: { orders: CompletedOrderRecord[] } = chatResponse?.ok
           ? await chatResponse.json()
           : { orders: [] };
-        if (telephonyResponse.ok || chatResponse.ok) {
+        if (telephonyResponse?.ok || chatResponse?.ok) {
           const phoneSessionIds = new Set(
             telephonyData.orders.map((record) => record.session_id).filter(Boolean)
           );
@@ -230,7 +230,7 @@ export default function DashboardScreen({
             }];
           }));
         }
-        if (approvalsResponse.ok) setApprovals(await approvalsResponse.json());
+        if (approvalsResponse?.ok) setApprovals(await approvalsResponse.json());
       } catch {
         // Preserve the last successful view while the backend is temporarily unavailable.
       }
@@ -240,7 +240,10 @@ export default function DashboardScreen({
     return () => { active = false; window.clearInterval(interval); };
   }, [api, telephonyApi, chatManagerApi, refreshKey]);
 
-  const needsApproval = approvals.map((approval) => approvalCard(approval, onOpenApprovals));
+  const needsApproval = [
+    ...orders.filter((order) => order.approval_pending).map(queueCard),
+    ...approvals.map((approval) => approvalCard(approval, onOpenApprovals)),
+  ];
   const approved = orders.filter((order) => order.status === "received" && !order.approval_pending).map(queueCard);
   const preparing = orders.filter((order) => order.status === "preparing").map(queueCard);
   const ready = orders.filter((order) => order.status === "ready").map(queueCard);

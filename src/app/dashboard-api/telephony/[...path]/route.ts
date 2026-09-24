@@ -8,6 +8,7 @@ export const dynamic = "force-dynamic";
 
 const ALLOWED_ROUTES = [
   /^orders\/recent$/,
+  /^orders\/\d+\/(?:approve|reject)$/,
   /^handoffs\/recent$/,
   /^cost\/calls$/,
   /^callers$/,

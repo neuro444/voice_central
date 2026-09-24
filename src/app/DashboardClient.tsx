@@ -108,6 +108,7 @@ interface Lead {
 
 interface KitchenOrder {
   id: string;
+  telephony_order_id?: number;
   lead_id?: number;
   order_number: string;
   customer_name: string;
@@ -1565,6 +1566,7 @@ function playFallbackDing() {
 
 interface TelephonyOrderRecord {
   event: string;
+  order_id?: number;
   emitted_at: string;
   call_uuid: string;
   user_id: string;
@@ -1573,6 +1575,7 @@ interface TelephonyOrderRecord {
   name?: string;
   channel?: string;
   approval_pending?: boolean;
+  approval_status?: "pending" | "approved" | "rejected";
   summary?: string;
   order: {
     customer_name?: string;
@@ -1624,6 +1627,7 @@ function mapTelephonyOrderToKitchenOrder(record: TelephonyOrderRecord): KitchenO
   const order = record.order;
   return {
     id: record.call_uuid,
+    telephony_order_id: record.order_id,
     order_number: record.call_uuid.slice(0, 8).toUpperCase(),
     customer_name: order.customer_name || record.name || "Unknown",
     customer_phone: record.user_id || "",
@@ -1636,6 +1640,7 @@ function mapTelephonyOrderToKitchenOrder(record: TelephonyOrderRecord): KitchenO
     subtotal: toNum(order.subtotal),
     tax: toNum(order.tax),
     approval_pending: Boolean(record.approval_pending),
+    approval_status: record.approval_status || null,
     // No lifecycle tracking exists in telephony yet -- every order defaults
     // to "received" until real status tracking is built there.
     status: "received",
@@ -1683,6 +1688,7 @@ function KitchenTab({
   const [orders, setOrders] = useState<KitchenOrder[]>([]);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [printingId, setPrintingId] = useState<string | null>(null);
+  const [approvalUpdatingId, setApprovalUpdatingId] = useState<string | null>(null);
   const [filter, setFilter] = useState<"takeaway" | "catering" | "all">("all");
   const [orderQuery, setOrderQuery] = useState("");
   const [orderSort, setOrderSort] = useState<"newest" | "oldest" | "customer">("newest");
@@ -1749,6 +1755,29 @@ function KitchenTab({
     // does not exist in telephony yet -- there is no backend endpoint to
     // call. Surfacing this clearly rather than pretending the click worked.
     window.alert("Status tracking isn't wired up yet on the phone side.");
+  }
+
+  async function updateApproval(order: KitchenOrder, action: "approve" | "reject") {
+    if (!order.telephony_order_id) {
+      window.alert("This order is not linked to a Plivo approval record.");
+      return;
+    }
+    setApprovalUpdatingId(order.id);
+    try {
+      const response = await fetch(
+        `${telephonyApi}/orders/${order.telephony_order_id}/${action}`,
+        { method: "POST" },
+      );
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.detail || `Could not ${action} order`);
+      }
+      await loadOrders();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : `Could not ${action} order`);
+    } finally {
+      setApprovalUpdatingId(null);
+    }
   }
 
   async function printTicket(order: KitchenOrder) {
@@ -1901,6 +1930,26 @@ function KitchenTab({
                   <strong>{money(order.estimated_total)}</strong>
                 </div>
                 <div className="orders-card-controls">
+                  {order.approval_pending && order.telephony_order_id && (
+                    <div className="orders-approval-actions" aria-label="Order approval actions">
+                      <button
+                        type="button"
+                        className="orders-reject-button"
+                        disabled={approvalUpdatingId === order.id}
+                        onClick={() => updateApproval(order, "reject")}
+                      >
+                        Reject
+                      </button>
+                      <button
+                        type="button"
+                        className="orders-approve-button"
+                        disabled={approvalUpdatingId === order.id}
+                        onClick={() => updateApproval(order, "approve")}
+                      >
+                        Approve &amp; print
+                      </button>
+                    </div>
+                  )}
                   <div className="orders-stepper" aria-label="Order status">
                     {kitchenStatuses.map((status, index) => (
                       <div className="orders-step-wrap" key={status}>

@@ -710,6 +710,13 @@ textarea.editable-draft:focus { outline: 2px solid var(--accent); }
 .orders-pickup-total span { color: #5d3f3c; font-size: 11px; }
 .orders-pickup-total strong { color: #aa0011; font-size: 16px; }
 .orders-card-controls { gap: 12px; }
+.orders-approval-actions { display: flex; align-items: center; gap: 8px; }
+.orders-approval-actions button { min-height: 34px; padding: 7px 12px; border-radius: 8px; font: inherit; font-size: 11px; font-weight: 700; cursor: pointer; }
+.orders-approval-actions button:disabled { cursor: wait; opacity: 0.55; }
+.orders-reject-button { border: 1px solid #e6bdb8; background: #fff; color: #aa0011; }
+.orders-reject-button:hover { background: #fff0ee; }
+.orders-approve-button { border: 1px solid #aa0011; background: #aa0011; color: #fff; }
+.orders-approve-button:hover { background: #87000d; }
 .orders-stepper, .orders-step-wrap { display: flex; align-items: flex-start; }
 .orders-step { width: 44px; display: flex; align-items: center; justify-content: center; padding: 5px 0; border: 0; background: transparent; color: #9b9ba1; font: inherit; cursor: pointer; }
 .orders-step-dot { width: 8px; height: 8px; border-radius: 50%; background: #e7e7ea; }
