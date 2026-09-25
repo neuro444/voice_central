@@ -35,21 +35,52 @@ class InstallerTests(unittest.TestCase):
         current = base.replace('line 1\n', 'server edit\n')
         target = base.replace('line 18\n', 'integration edit\n')
         with tempfile.TemporaryDirectory() as temp:
-            result = installer.merge_source(current, base, target, Path(temp))
+            result = installer.merge_source('some/other/file.ts', current, base, target, Path(temp))
         self.assertIn('server edit', result)
         self.assertIn('integration edit', result)
 
     def test_merge_conflict_rejected(self):
         with tempfile.TemporaryDirectory() as temp:
             with self.assertRaises(RuntimeError):
-                installer.merge_source('server\n', 'base\n', 'local\n', Path(temp))
+                installer.merge_source('some/other/file.ts', 'server\n', 'base\n', 'local\n', Path(temp))
 
     def test_new_route_and_rerun(self):
         with tempfile.TemporaryDirectory() as temp:
-            self.assertEqual(installer.merge_source(None, None, 'new', Path(temp)), 'new')
-            self.assertEqual(installer.merge_source('new', None, 'new', Path(temp)), 'new')
+            self.assertEqual(installer.merge_source('some/other/file.ts', None, None, 'new', Path(temp)), 'new')
+            self.assertEqual(installer.merge_source('some/other/file.ts', 'new', None, 'new', Path(temp)), 'new')
             with self.assertRaises(RuntimeError):
-                installer.merge_source('existing', None, 'new', Path(temp))
+                installer.merge_source('some/other/file.ts', 'existing', None, 'new', Path(temp))
+
+    def test_known_intermediate_server_state_reconciled(self):
+        # A prior installer run deployed the 401->502 auth-loop fix for this
+        # route directly to the server without committing that intermediate
+        # version, so git has no common ancestor to 3-way-merge against the
+        # later version that also adds the history routes. This is the
+        # actual real-world incident this reconciliation was built for.
+        name = 'src/app/dashboard-api/elevenlabs-agent/[...path]/route.ts'
+        current = installer.KNOWN_INTERMEDIATE_SERVER_STATE[name]
+        target = current.replace(
+            '  const apiKey = process.env.ELEVENLABS_AGENT_API_KEY;',
+            '  const apiKey = path.startsWith("elevenlabs/")\n'
+            '    ? process.env.ELEVENLABS_CONVERSATIONS_API_KEY\n'
+            '    : process.env.ELEVENLABS_AGENT_API_KEY;',
+        ).replace(
+            '  /^callers$/,\n',
+            '  /^callers$/,\n  /^elevenlabs\\/saved$/,\n',
+        )
+        with tempfile.TemporaryDirectory() as temp:
+            result = installer.merge_source(name, current, 'unrelated-base', target, Path(temp))
+        self.assertEqual(result, target)
+
+    def test_known_intermediate_server_state_does_not_misfire(self):
+        # If the server's file is even slightly different from the exact
+        # known intermediate snapshot, this must NOT silently take target --
+        # it should fall through to the normal merge/conflict path.
+        name = 'src/app/dashboard-api/elevenlabs-agent/[...path]/route.ts'
+        current = installer.KNOWN_INTERMEDIATE_SERVER_STATE[name] + '\n// unexpected extra line'
+        with tempfile.TemporaryDirectory() as temp:
+            with self.assertRaises(RuntimeError):
+                installer.merge_source(name, current, None, 'target', Path(temp))
 
     def test_committed_new_route_absent_on_server(self):
         name = 'src/app/dashboard-api/elevenlabs-agent/[...path]/route.ts'
