@@ -62,6 +62,19 @@ export async function GET(
       upstream: "chat_manager",
       status: upstream.status,
     });
+    if (upstream.status === 401 || upstream.status === 403) {
+      // A same-origin 401 makes the dashboard's global fetch patch redirect
+      // to /login, mistaking a BACKEND auth failure (e.g. a stale/misconfigured
+      // CHAT_MANAGER_API_KEY) for an expired staff session -- this was the
+      // root cause of the "dashboard blinking" login loop. Never forward the
+      // raw upstream status for 401/403; log it here (no credentials) and
+      // surface it to the browser as a 502 instead.
+      console.error(`[chat-manager proxy] backend auth failure on ${path}: upstream returned ${upstream.status}`);
+      return NextResponse.json(
+        { error: "Chat Manager backend authentication failed" },
+        { status: 502 }
+      );
+    }
     return new NextResponse(await upstream.arrayBuffer(), {
       status: upstream.status,
       headers: {

@@ -23,7 +23,7 @@ export interface AuditEntry {
   /** Proxied path, e.g. "sessions/abc123/messages". */
   path: string;
   /** Which upstream service was called. */
-  upstream: "chat_manager" | "telephony";
+  upstream: "chat_manager" | "telephony" | "elevenlabs-agent";
   /** HTTP status code returned by the upstream service. */
   status: number;
 }

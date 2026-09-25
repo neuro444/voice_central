@@ -1,4 +1,5 @@
 "use client";
+import { fetchSavedHistory, mapElevenLabsCall, mapElevenLabsMessages, historyId, type ElevenLabsCall } from "@/lib/elevenlabs-history";
 import Image from "next/image";
 import { useState, useEffect, useRef } from "react";
 import type { ReactNode } from "react";
@@ -8,6 +9,7 @@ import { AnalyticsScreen, MenuScreen } from "./ReferenceScreens";
 const API = process.env.NEXT_PUBLIC_API_URL!;
 const TELEPHONY_API = "/dashboard-api/telephony";
 const CHAT_MANAGER_API = "/dashboard-api/chat-manager";
+const ELEVENLABS_AGENT_API = "/dashboard-api/elevenlabs-agent";
 // Print service base URL. Set NEXT_PUBLIC_PRINT_API_URL to switch targets
 // (https://cakeworld.neuroheart.ai on the VPS, http://localhost:7860 locally).
 // If unset, fall back to same-origin so the button posts to /print/order on
@@ -185,8 +187,8 @@ function asUtc(dt: string): Date {
 }
 function fmt(dt: string) {
   if (!dt) return "";
-  return asUtc(dt).toLocaleTimeString("en-US", {
-    hour: "2-digit", minute: "2-digit", timeZone: RESTAURANT_TZ,
+  return asUtc(dt).toLocaleString("en-US", {
+    month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", timeZone: RESTAURANT_TZ,
   });
 }
 
@@ -459,6 +461,9 @@ export default function Home() {
   const [staffDraft, setStaffDraft] = useState("");
   const [staffSending, setStaffSending] = useState(false);
   const [operationsRefreshKey, setOperationsRefreshKey] = useState(0);
+  const historyCache = useRef(new Map<string, ElevenLabsCall>());
+  const conversationSources = useRef<{ chat: Conversation[]; elevenlabs: Conversation[] }>({ chat: [], elevenlabs: [] });
+  const messageRequest = useRef(0);
   const wsRef = useRef<WebSocket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -520,29 +525,28 @@ function mapChatManagerMessage(m: ChatManagerMessage): Message {
 }
 
   async function loadConversations() {
-    // Phone conversations come from chat_manager's real /callers + /sessions.
-    // WhatsApp still points at the old dead endpoint -- a pre-existing gap,
-    // not something this pass fixes, so it stays empty rather than faked.
-    try {
-      const callersRes = await fetch(`${CHAT_MANAGER_API}/callers`);
-      if (!callersRes.ok) return;
-      const callers: ChatManagerCaller[] = await callersRes.json();
-      const sessionLists = await Promise.all(
-        callers.map((caller) =>
-          fetch(`${CHAT_MANAGER_API}/sessions?user_id=${encodeURIComponent(caller.user_id)}`)
-            .then((r) => (r.ok ? r.json() : []))
-            .then((sessions: ChatManagerSession[]) =>
-              sessions.map((s) => mapSessionToConversation(s, caller))
-            )
-            .catch(() => [])
-        )
-      );
-      const data = sessionLists.flat();
-      setConversations(data);
-      setSelectedConv((current) =>
-        current ? data.find((c: Conversation) => c.id === current.id) || current : current
-      );
-    } catch { /* retain last successful data during outages */ }
+    await Promise.allSettled([
+      (async () => {
+        const callersRes = await fetch(`${CHAT_MANAGER_API}/callers`);
+        if (!callersRes.ok) throw new Error("Chat history unavailable");
+        const callers: ChatManagerCaller[] = await callersRes.json();
+        const lists = await Promise.all(callers.map(async caller => {
+          const response = await fetch(`${CHAT_MANAGER_API}/sessions?user_id=${encodeURIComponent(caller.user_id)}`);
+          if (!response.ok) throw new Error("Chat sessions unavailable");
+          return (await response.json() as ChatManagerSession[]).map(s => mapSessionToConversation(s, caller));
+        }));
+        conversationSources.current.chat = lists.flat();
+      })(),
+      (async () => {
+        const calls = await fetchSavedHistory(fetch, ELEVENLABS_AGENT_API);
+        calls.forEach(call => historyCache.current.set(historyId(call.conversation_id), call));
+        conversationSources.current.elevenlabs = calls.map(mapElevenLabsCall);
+      })(),
+    ]);
+    const data = [...conversationSources.current.chat, ...conversationSources.current.elevenlabs]
+      .sort((a, b) => Date.parse(b.last_message_at) - Date.parse(a.last_message_at));
+    setConversations(data);
+    setSelectedConv(current => current ? data.find(c => c.id === current.id) || current : current);
   }
   async function loadApprovals() {
     try {
@@ -551,15 +555,27 @@ function mapChatManagerMessage(m: ChatManagerMessage): Message {
     } catch { /* retain last successful data during outages */ }
   }
   async function loadMessages(convId: string, phone: string) {
+    const requestId = ++messageRequest.current;
+    setMessages([]);
+    if (convId.startsWith("elevenlabs:")) {
+      const saved = historyCache.current.get(convId);
+      if (saved) setMessages(mapElevenLabsMessages(saved));
+      try {
+        const response = await fetch(`${ELEVENLABS_AGENT_API}/elevenlabs/conversations/${encodeURIComponent(convId.slice("elevenlabs:".length))}`);
+        if (!response.ok) throw new Error("Transcript unavailable");
+        const call: ElevenLabsCall = await response.json();
+        if (historyId(call.conversation_id) !== convId) throw new Error("Conversation mismatch");
+        if (requestId === messageRequest.current) setMessages(mapElevenLabsMessages(call));
+      } catch { if (!saved && requestId === messageRequest.current) showToast("Unable to load ElevenLabs transcript"); }
+      return;
+    }
     try {
-      const r = await fetch(
-        `${CHAT_MANAGER_API}/sessions/${convId}/messages?user_id=${encodeURIComponent(phone)}`
-      );
-      if (r.ok) {
-        const raw: ChatManagerMessage[] = await r.json();
-        setMessages(raw.map(mapChatManagerMessage));
+      const response = await fetch(`${CHAT_MANAGER_API}/sessions/${convId}/messages?user_id=${encodeURIComponent(phone)}`);
+      if (response.ok && requestId === messageRequest.current) {
+        const raw: ChatManagerMessage[] = await response.json();
+        if (requestId === messageRequest.current) setMessages(raw.map(mapChatManagerMessage));
       }
-    } catch { /* retain last successful data during outages */ }
+    } catch { /* next refresh retries */ }
   }
   async function loadStatus() {
     try {
@@ -781,7 +797,8 @@ function mapChatManagerMessage(m: ChatManagerMessage): Message {
 
   useEffect(() => {
     if (selectedConv) loadMessages(selectedConv.id, selectedConv.phone);
-  }, [selectedConv]);
+    else { messageRequest.current++; setMessages([]); }
+  }, [selectedConv?.id]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -969,6 +986,7 @@ function mapChatManagerMessage(m: ChatManagerMessage): Message {
             api={API}
             telephonyApi={TELEPHONY_API}
             chatManagerApi={CHAT_MANAGER_API}
+            elevenlabsApi={ELEVENLABS_AGENT_API}
             refreshKey={operationsRefreshKey}
             accountMenu={<AccountMenu {...accountMenuProps} />}
             onOpenApprovals={() => setTab("approvals")}
@@ -1047,6 +1065,7 @@ function mapChatManagerMessage(m: ChatManagerMessage): Message {
             api={API}
             telephonyApi={TELEPHONY_API}
             chatManagerApi={CHAT_MANAGER_API}
+            elevenlabsApi={ELEVENLABS_AGENT_API}
             refreshKey={operationsRefreshKey}
             accountMenu={<AccountMenu {...accountMenuProps} compact />}
           />
@@ -1667,16 +1686,88 @@ function mapHandoffToKitchenOrder(record: TelephonyOrderRecord): KitchenOrder | 
   };
 }
 
+// 11agent_repo/dashboard_api.py's _order_record()/_handoff_record() shape --
+// keyed by conversation_id (no call_uuid/session_id), items_text is free
+// text (no structured per-line items -- ElevenLabs data collection only
+// supports scalar field types), and request_type is always fixed to
+// "handoff" (the source field is a boolean, not a category string like
+// Plivo's cake/catering), so there is no category to filter on here.
+interface ElevenLabsOrderRecord {
+  event: string;
+  emitted_at: string;
+  conversation_id: string;
+  user_id: string;
+  order_type: string;
+  name?: string;
+  summary?: string;
+  channel?: string;
+  approval_pending?: boolean;
+  order: {
+    customer_name?: string;
+    fulfillment?: string;
+    items_text?: string;
+    total?: string | number;
+    preparation_minutes?: string;
+    contact_phone?: string;
+    request_type?: string;
+    summary?: string;
+  } | null;
+}
+
+function mapElevenLabsOrderToKitchenOrder(record: ElevenLabsOrderRecord): KitchenOrder | null {
+  if (!record.order) return null;
+  const order = record.order;
+  return {
+    id: record.conversation_id,
+    order_number: record.conversation_id.slice(0, 8).toUpperCase(),
+    customer_name: order.customer_name || record.name || "Unknown",
+    customer_phone: record.user_id || "",
+    order_type: mapOrderTypeToFilterBucket(record.order_type),
+    channel: record.channel || "elevenlabs",
+    items: order.items_text ? [{ name: order.items_text, quantity: 1, qty: 1 }] : [],
+    pickup_time: order.preparation_minutes || "",
+    fulfillment_method: order.fulfillment,
+    estimated_total: toNum(order.total),
+    subtotal: null,
+    tax: null,
+    approval_pending: Boolean(record.approval_pending),
+    status: "received",
+    created_at: record.emitted_at,
+  };
+}
+
+function mapElevenLabsHandoffToKitchenOrder(record: ElevenLabsOrderRecord): KitchenOrder | null {
+  if (record.event !== "manager_handoff") return null;
+  return {
+    id: record.conversation_id,
+    order_number: record.conversation_id.slice(0, 8).toUpperCase(),
+    customer_name: record.name || "Manager callback",
+    customer_phone: record.order?.contact_phone || record.user_id || "",
+    order_type: "catering",
+    channel: record.channel || "elevenlabs",
+    items: [{ name: record.order?.summary || record.summary || "Manager callback", quantity: 1, qty: 1 }],
+    pickup_time: "",
+    estimated_total: null,
+    subtotal: null,
+    tax: null,
+    approval_pending: Boolean(record.approval_pending),
+    status: "received",
+    created_at: record.emitted_at,
+  };
+}
+
 function KitchenTab({
   api,
   telephonyApi,
   chatManagerApi,
+  elevenlabsApi,
   refreshKey,
   accountMenu,
 }: {
   api: string;
   telephonyApi: string;
   chatManagerApi: string;
+  elevenlabsApi: string;
   refreshKey: number;
   accountMenu: ReactNode;
 }) {
@@ -1693,10 +1784,12 @@ function KitchenTab({
 
   async function loadOrders() {
     try {
-      const [telephonyResponse, chatResponse, handoffResponse] = await Promise.all([
+      const [telephonyResponse, chatResponse, handoffResponse, elevenlabsResponse, elevenlabsHandoffResponse] = await Promise.all([
         fetch(`${telephonyApi}/orders/recent`),
         fetch(`${chatManagerApi}/orders/recent`),
         fetch(`${telephonyApi}/handoffs/recent`),
+        fetch(`${elevenlabsApi}/orders/recent`),
+        fetch(`${elevenlabsApi}/handoffs/recent`),
       ]);
       const telephonyData: { orders: TelephonyOrderRecord[] } = telephonyResponse.ok
         ? await telephonyResponse.json()
@@ -1704,7 +1797,7 @@ function KitchenTab({
       const chatData: { orders: TelephonyOrderRecord[] } = chatResponse.ok
         ? await chatResponse.json()
         : { orders: [] };
-      if (!telephonyResponse.ok && !chatResponse.ok) return;
+      if (!telephonyResponse.ok && !chatResponse.ok && !elevenlabsResponse.ok) return;
 
       // Phone orders are present in both stores. Prefer telephony's event copy,
       // then add browser/direct-chat orders that have no matching session.
@@ -1724,7 +1817,22 @@ function KitchenTab({
       const cateringOrders = (handoffData.handoffs || [])
         .map(mapHandoffToKitchenOrder)
         .filter((order): order is KitchenOrder => order !== null);
-      const allOrders = [...next, ...cateringOrders];
+      // ElevenLabs is a separate call system (own conversation_id, no
+      // session_id) -- it never overlaps with phone/chat records, so it's
+      // appended directly rather than run through the phoneSessionIds dedup.
+      const elevenlabsData: { orders: ElevenLabsOrderRecord[] } = elevenlabsResponse.ok
+        ? await elevenlabsResponse.json()
+        : { orders: [] };
+      const elevenlabsOrders = elevenlabsData.orders
+        .map(mapElevenLabsOrderToKitchenOrder)
+        .filter((o): o is KitchenOrder => o !== null);
+      const elevenlabsHandoffData: { handoffs?: ElevenLabsOrderRecord[] } = elevenlabsHandoffResponse.ok
+        ? await elevenlabsHandoffResponse.json()
+        : { handoffs: [] };
+      const elevenlabsCateringOrders = (elevenlabsHandoffData.handoffs || [])
+        .map(mapElevenLabsHandoffToKitchenOrder)
+        .filter((order): order is KitchenOrder => order !== null);
+      const allOrders = [...next, ...cateringOrders, ...elevenlabsOrders, ...elevenlabsCateringOrders];
       setOrders(allOrders);
 
     // First load: remember everything without printing the backlog.
@@ -1794,7 +1902,7 @@ function KitchenTab({
     loadOrders();
     const interval = setInterval(loadOrders, 10000);
     return () => clearInterval(interval);
-  }, [api, telephonyApi, chatManagerApi]);
+  }, [api, telephonyApi, chatManagerApi, elevenlabsApi]);
 
   useEffect(() => {
     loadOrders();

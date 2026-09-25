@@ -35,6 +35,45 @@ interface CompletedOrderRecord {
   } | null;
 }
 
+// 11agent_repo/dashboard_api.py's _order_record() shape -- keyed by
+// conversation_id (no call_uuid/session_id), and items_text is free text
+// (no structured per-line items), since ElevenLabs data collection only
+// supports scalar field types (see 11agent_repo/docs/ design spec).
+interface ElevenLabsOrderRecord {
+  emitted_at: string;
+  conversation_id: string;
+  user_id: string;
+  name?: string;
+  channel?: string;
+  approval_pending?: boolean;
+  order: {
+    customer_name?: string;
+    items_text?: string;
+    total?: string | number;
+  } | null;
+}
+
+function mapElevenLabsOrderToDashboardOrder(record: ElevenLabsOrderRecord): DashboardOrder | null {
+  if (!record.order) return null;
+  const totalValue = record.order.total;
+  const total = totalValue == null || totalValue === ""
+    ? null
+    : (typeof totalValue === "number" ? totalValue : Number.parseFloat(totalValue));
+  return {
+    id: record.conversation_id,
+    customer_name: record.order.customer_name || record.name || "Unknown",
+    customer_phone: record.user_id || "",
+    channel: record.channel || "elevenlabs",
+    items: record.order.items_text ? [{ name: record.order.items_text, quantity: 1 }] : [],
+    estimated_total: Number.isFinite(total) ? total : null,
+    subtotal: null,
+    tax: null,
+    status: "received",
+    approval_pending: Boolean(record.approval_pending),
+    created_at: record.emitted_at,
+  };
+}
+
 interface DashboardApproval {
   approval_id: number;
   customer_name: string;
@@ -164,6 +203,7 @@ export default function DashboardScreen({
   api,
   telephonyApi,
   chatManagerApi,
+  elevenlabsApi,
   refreshKey,
   accountMenu,
   onOpenApprovals,
@@ -174,6 +214,7 @@ export default function DashboardScreen({
   api: string;
   telephonyApi: string;
   chatManagerApi: string;
+  elevenlabsApi: string;
   refreshKey: number;
   accountMenu: ReactNode;
   onOpenApprovals: () => void;
@@ -188,9 +229,10 @@ export default function DashboardScreen({
     let active = true;
     async function loadDashboardData() {
       try {
-        const [telephonyResponse, chatResponse, approvalsResponse] = await Promise.all([
+        const [telephonyResponse, chatResponse, elevenlabsResponse, approvalsResponse] = await Promise.all([
           fetch(`${telephonyApi}/orders/recent`),
           fetch(`${chatManagerApi}/orders/recent`),
+          fetch(`${elevenlabsApi}/orders/recent`),
           fetch(`${api}/api/approvals`),
         ]);
         if (!active) return;
@@ -200,7 +242,10 @@ export default function DashboardScreen({
         const chatData: { orders: CompletedOrderRecord[] } = chatResponse.ok
           ? await chatResponse.json()
           : { orders: [] };
-        if (telephonyResponse.ok || chatResponse.ok) {
+        const elevenlabsData: { orders: ElevenLabsOrderRecord[] } = elevenlabsResponse.ok
+          ? await elevenlabsResponse.json()
+          : { orders: [] };
+        if (telephonyResponse.ok || chatResponse.ok || elevenlabsResponse.ok) {
           const phoneSessionIds = new Set(
             telephonyData.orders.map((record) => record.session_id).filter(Boolean)
           );
@@ -208,13 +253,13 @@ export default function DashboardScreen({
             ...telephonyData.orders,
             ...chatData.orders.filter((record) => !phoneSessionIds.has(record.session_id)),
           ].sort((a, b) => b.emitted_at.localeCompare(a.emitted_at));
-          setOrders(merged.flatMap((record) => {
+          const numberValue = (value: string | number | undefined) => {
+            if (value == null || value === "") return null;
+            const parsed = typeof value === "number" ? value : Number.parseFloat(value);
+            return Number.isNaN(parsed) ? null : parsed;
+          };
+          const mappedPhoneAndChat = merged.flatMap((record) => {
             if (!record.order) return [];
-            const numberValue = (value: string | number | undefined) => {
-              if (value == null || value === "") return null;
-              const parsed = typeof value === "number" ? value : Number.parseFloat(value);
-              return Number.isNaN(parsed) ? null : parsed;
-            };
             return [{
               id: record.call_uuid,
               customer_name: record.order.customer_name || record.name || "Unknown",
@@ -228,7 +273,18 @@ export default function DashboardScreen({
               approval_pending: Boolean(record.approval_pending),
               created_at: record.emitted_at,
             }];
-          }));
+          });
+          // ElevenLabs orders are a distinct call system (own conversation_id,
+          // no session_id) -- they never overlap with phone/chat records, so
+          // no dedup against phoneSessionIds is needed, just append + re-sort.
+          const mappedElevenLabs = elevenlabsData.orders
+            .map(mapElevenLabsOrderToDashboardOrder)
+            .filter((o): o is DashboardOrder => o !== null);
+          setOrders(
+            [...mappedPhoneAndChat, ...mappedElevenLabs].sort((a, b) =>
+              b.created_at.localeCompare(a.created_at)
+            )
+          );
         }
         if (approvalsResponse.ok) setApprovals(await approvalsResponse.json());
       } catch {
@@ -238,7 +294,7 @@ export default function DashboardScreen({
     void loadDashboardData();
     const interval = window.setInterval(loadDashboardData, 10000);
     return () => { active = false; window.clearInterval(interval); };
-  }, [api, telephonyApi, chatManagerApi, refreshKey]);
+  }, [api, telephonyApi, chatManagerApi, elevenlabsApi, refreshKey]);
 
   const needsApproval = approvals.map((approval) => approvalCard(approval, onOpenApprovals));
   const approved = orders.filter((order) => order.status === "received" && !order.approval_pending).map(queueCard);

@@ -6,18 +6,15 @@ import { writeAuditLog } from "@/lib/audit";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// 11agent_repo/dashboard_api.py exposes exactly these four routes -- no
+// /sessions, /menu, or /crm/customers there (see that file's own docstring).
 const ALLOWED_ROUTES = [
   /^orders\/recent$/,
   /^handoffs\/recent$/,
   /^cost\/calls$/,
   /^callers$/,
-  /^sessions$/,
-  /^sessions\/[A-Za-z0-9_-]+\/(?:messages|debug)$/,
-  /^menu$/,
-  /^menu\/prompt$/,
-  /^menu\/items$/,
-  /^menu\/items\/\d+$/,
-  /^crm\/customers$/,
+  /^elevenlabs\/saved$/,
+  /^elevenlabs\/conversations\/[A-Za-z0-9_-]{1,200}$/,
 ];
 
 function allowed(path: string): boolean {
@@ -38,14 +35,20 @@ async function proxy(
   const { path: segments } = await context.params;
   const path = segments.join("/");
   if (!allowed(path)) {
-    return NextResponse.json({ error: "Unsupported Telephony route" }, { status: 404 });
+    return NextResponse.json({ error: "Unsupported ElevenLabs agent route" }, { status: 404 });
   }
 
-  const baseUrl = process.env.TELEPHONY_INTERNAL_URL;
-  const apiKey = process.env.TELEPHONY_API_KEY;
+  if (path.startsWith("elevenlabs/") && method !== "GET") {
+    return NextResponse.json({ error: "Method not allowed" }, { status: 405 });
+  }
+
+  const baseUrl = process.env.ELEVENLABS_AGENT_INTERNAL_URL;
+  const apiKey = path.startsWith("elevenlabs/")
+    ? process.env.ELEVENLABS_CONVERSATIONS_API_KEY
+    : process.env.ELEVENLABS_AGENT_API_KEY;
   if (!baseUrl || !apiKey) {
     return NextResponse.json(
-      { error: "Telephony integration is not configured" },
+      { error: "ElevenLabs agent integration is not configured" },
       { status: 503 }
     );
   }
@@ -72,19 +75,20 @@ async function proxy(
       staff: session.sub,
       method,
       path,
-      upstream: "telephony",
+      upstream: "elevenlabs-agent",
       status: upstream.status,
     });
     if (upstream.status === 401 || upstream.status === 403) {
       // A same-origin 401 makes the dashboard's global fetch patch redirect
       // to /login, mistaking a BACKEND auth failure (e.g. a stale/misconfigured
-      // TELEPHONY_API_KEY / PLIVO_AGENT_API_KEY) for an expired staff session --
-      // this was the root cause of the "dashboard blinking" login loop. Never
+      // ELEVENLABS_AGENT_API_KEY) for an expired staff session -- this was the
+      // root cause of the "dashboard blinking" login loop (see
+      // plivo_agent_repo/dashboard_blinking_stop_plan_worked.md). Never
       // forward the raw upstream status for 401/403; log it here (no
       // credentials) and surface it to the browser as a 502 instead.
-      console.error(`[telephony proxy] backend auth failure on ${path}: upstream returned ${upstream.status}`);
+      console.error(`[elevenlabs-agent proxy] backend auth failure on ${path}: upstream returned ${upstream.status}`);
       return NextResponse.json(
-        { error: "Telephony backend authentication failed" },
+        { error: "ElevenLabs agent backend authentication failed" },
         { status: 502 }
       );
     }
@@ -96,7 +100,7 @@ async function proxy(
       },
     });
   } catch {
-    return NextResponse.json({ error: "Telephony is unavailable" }, { status: 502 });
+    return NextResponse.json({ error: "ElevenLabs agent is unavailable" }, { status: 502 });
   }
 }
 
