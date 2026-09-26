@@ -188,7 +188,7 @@ function asUtc(dt: string): Date {
 function fmt(dt: string) {
   if (!dt) return "";
   return asUtc(dt).toLocaleString("en-US", {
-    month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", timeZone: RESTAURANT_TZ,
+    year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", timeZone: RESTAURANT_TZ,
   });
 }
 

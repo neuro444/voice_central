@@ -75,6 +75,7 @@ function mapElevenLabsOrderToDashboardOrder(record: ElevenLabsOrderRecord): Dash
 }
 
 interface DashboardApproval {
+  created_at?: string;
   approval_id: number;
   customer_name: string;
   customer_phone: string;
@@ -95,11 +96,21 @@ interface DashboardConversation {
 }
 
 interface QueueCard {
+  created_at?: string;
   id: string;
   customer: string;
   items: string;
   total: number | null;
   onClick?: () => void;
+}
+
+function formatDateTime(value: string) {
+  if (!value) return "";
+  const normalized = /[zZ]|[+-]\d{2}:?\d{2}$/.test(value) ? value : `${value.replace(" ", "T")}Z`;
+  const date = new Date(normalized);
+  return Number.isNaN(date.getTime()) ? "" : date.toLocaleString("en-US", {
+    year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "America/New_York",
+  });
 }
 
 function orderTotal(order: DashboardOrder) {
@@ -110,6 +121,7 @@ function orderTotal(order: DashboardOrder) {
 function queueCard(order: DashboardOrder): QueueCard {
   return {
     id: String(order.id),
+    created_at: order.created_at,
     customer: order.customer_name || order.customer_phone,
     items: order.items.map((item) => `${item.qty || item.quantity || 1}× ${item.name || "Item"}`).join(", ") || "No items listed",
     total: orderTotal(order),
@@ -131,6 +143,7 @@ function approvalItemsSummary(itemsJson: string): string {
 function approvalCard(approval: DashboardApproval, onClick: () => void): QueueCard {
   return {
     id: String(approval.approval_id),
+    created_at: approval.created_at,
     customer: approval.customer_name || approval.customer_phone,
     items: approvalItemsSummary(approval.items_json),
     total:
@@ -170,6 +183,7 @@ function QueueColumn({
             const content = (
               <>
                 <div className="dashboard-order-number"><strong>#{card.id}</strong><span aria-hidden="true">⌁</span></div>
+                {card.created_at && <time dateTime={card.created_at}>{formatDateTime(card.created_at)}</time>}
                 <h4>{card.customer}</h4>
                 <p>{card.items}</p>
                 <strong className="dashboard-order-total">
@@ -319,7 +333,7 @@ export default function DashboardScreen({
               <button type="button" key={conversation.id} onClick={onOpenConversations}>
                 <span className="dashboard-activity-avatar">{(conversation.name || conversation.phone || "?").slice(0, 1).toUpperCase()}</span>
                 <span><strong>{conversation.name || conversation.phone || "Unknown caller"}</strong><small>{conversation.last_message || "No message content"}</small></span>
-                <span><time>{new Date(conversation.last_message_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time><em>{conversation.channel || "Phone"}</em></span>
+                <span><time>{formatDateTime(conversation.last_message_at)}</time><em>{conversation.channel || "Phone"}</em></span>
               </button>
             ))}</div>
           )}
