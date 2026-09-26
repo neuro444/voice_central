@@ -10,18 +10,30 @@ function load(path, imports = {}, globals = {}) {
   return exports;
 }
 const history = load('src/lib/elevenlabs-history.ts');
-test('maps saved caller identity, status, timestamp and tool-only turns', () => {
+test('maps saved caller identity, status, timestamp and drops tool-only turns', () => {
   const call = {conversation_id:'conv1',status:'failed',metadata:{start_time_unix_secs:100},analysis:{data_collection_results:{customer_name:{value:'Test'},phone:{value:'+100'}}},transcript:[{role:'user',message:'Hello',time_in_call_secs:2},{role:'agent',message:null,tool_calls:[{tool_name:'calculate'}],time_in_call_secs:3}]};
   const mapped = history.mapElevenLabsCall(call);
   assert.equal(mapped.id, 'elevenlabs:conv1');
   assert.equal(mapped.name, 'Test');
   assert.equal(mapped.channel, 'phone');
   assert.match(mapped.intent, /failed/);
+  // A customer-facing transcript must never show raw tool_calls/tool_results
+  // JSON -- a turn with no spoken message (e.g. a pure workflow/tool step)
+  // is dropped entirely, not rendered as a garbled JSON message bubble.
   const messages = history.mapElevenLabsMessages(call);
-  assert.equal(messages.length, 2);
+  assert.equal(messages.length, 1);
   assert.equal(messages[0].direction, 'inbound');
+  assert.equal(messages[0].body, 'Hello');
   assert.equal(messages[0].created_at, new Date(102000).toISOString());
-  assert.match(messages[1].body, /calculate/);
+});
+test('spoken turns keep their message even when tool_calls are also present', () => {
+  const call = {conversation_id:'conv2',metadata:{start_time_unix_secs:0},transcript:[
+    {role:'agent',message:'Great, one samosa for pickup.',tool_calls:[{tool_name:'notify_condition_1_met'}],tool_results:[{tool_name:'notify_condition_1_met'}],time_in_call_secs:5},
+  ]};
+  const messages = history.mapElevenLabsMessages(call);
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].body, 'Great, one samosa for pickup.');
+  assert.doesNotMatch(messages[0].body, /tool_name|Tool calls|Tool results/);
 });
 test('paginates saved calls and deduplicates IDs', async () => {
   const urls = [];

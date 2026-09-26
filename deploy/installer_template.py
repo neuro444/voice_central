@@ -61,142 +61,8 @@ def request(url, headers=None, json_body=True):
         return json.load(response) if json_body else response.read()
 
 
-# One-time, hand-verified reconciliation: an earlier run of this installer
-# deployed the 401->502 auth-loop fix for this route directly to the server
-# (see dashboard_blinking_stop_plan_worked.md) without that intermediate
-# version ever being committed -- the file is brand new as of this repo's
-# HEAD, so git has no real common ancestor for the server's actual state and
-# a 3-way merge cannot reconstruct it. Manually diffed and confirmed exact:
-# the server's live file differs from the local target ONLY by missing the
-# two conversation-history route additions and this one line, which expands
-# to an equivalent ternary that behaves identically for every existing
-# (non-elevenlabs/-prefixed) request. Both sides are exact-matched, so this
-# can never silently misfire on an unrelated future difference.
-KNOWN_INTERMEDIATE_SERVER_STATE = {
-    'src/app/dashboard-api/elevenlabs-agent/[...path]/route.ts': """import { NextRequest, NextResponse } from "next/server";
-
-import { SESSION_COOKIE, verifyAndDecodeSessionToken } from "@/lib/auth";
-import { writeAuditLog } from "@/lib/audit";
-
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
-
-// 11agent_repo/dashboard_api.py exposes exactly these four routes -- no
-// /sessions, /menu, or /crm/customers there (see that file's own docstring).
-const ALLOWED_ROUTES = [
-  /^orders\\/recent$/,
-  /^handoffs\\/recent$/,
-  /^cost\\/calls$/,
-  /^callers$/,
-];
-
-function allowed(path: string): boolean {
-  return ALLOWED_ROUTES.some((pattern) => pattern.test(path));
-}
-
-async function proxy(
-  request: NextRequest,
-  context: { params: Promise<{ path: string[] }> },
-  method: "GET" | "POST" | "PUT" | "DELETE",
-) {
-  const token = request.cookies.get(SESSION_COOKIE)?.value;
-  const session = await verifyAndDecodeSessionToken(token);
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const { path: segments } = await context.params;
-  const path = segments.join("/");
-  if (!allowed(path)) {
-    return NextResponse.json({ error: "Unsupported ElevenLabs agent route" }, { status: 404 });
-  }
-
-  const baseUrl = process.env.ELEVENLABS_AGENT_INTERNAL_URL;
-  const apiKey = process.env.ELEVENLABS_AGENT_API_KEY;
-  if (!baseUrl || !apiKey) {
-    return NextResponse.json(
-      { error: "ElevenLabs agent integration is not configured" },
-      { status: 503 }
-    );
-  }
-
-  const upstreamUrl = new URL(path, `${baseUrl.replace(/\\/$/, "")}/`);
-  request.nextUrl.searchParams.forEach((value, key) => {
-    upstreamUrl.searchParams.append(key, value);
-  });
-
-  try {
-    const body = method === "GET" || method === "DELETE"
-      ? undefined
-      : await request.arrayBuffer();
-    const headers: Record<string, string> = { "X-API-Key": apiKey };
-    if (body) headers["Content-Type"] = request.headers.get("content-type") || "application/json";
-    const upstream = await fetch(upstreamUrl, {
-      method,
-      headers,
-      body,
-      cache: "no-store",
-    });
-    writeAuditLog({
-      timestamp: new Date().toISOString(),
-      staff: session.sub,
-      method,
-      path,
-      upstream: "elevenlabs-agent",
-      status: upstream.status,
-    });
-    if (upstream.status === 401 || upstream.status === 403) {
-      // A same-origin 401 makes the dashboard's global fetch patch redirect
-      // to /login, mistaking a BACKEND auth failure (e.g. a stale/misconfigured
-      // ELEVENLABS_AGENT_API_KEY) for an expired staff session -- this was the
-      // root cause of the "dashboard blinking" login loop (see
-      // plivo_agent_repo/dashboard_blinking_stop_plan_worked.md). Never
-      // forward the raw upstream status for 401/403; log it here (no
-      // credentials) and surface it to the browser as a 502 instead.
-      console.error(`[elevenlabs-agent proxy] backend auth failure on ${path}: upstream returned ${upstream.status}`);
-      return NextResponse.json(
-        { error: "ElevenLabs agent backend authentication failed" },
-        { status: 502 }
-      );
-    }
-    return new NextResponse(await upstream.arrayBuffer(), {
-      status: upstream.status,
-      headers: {
-        "Content-Type": upstream.headers.get("content-type") || "application/json",
-        "Cache-Control": "no-store",
-      },
-    });
-  } catch {
-    return NextResponse.json({ error: "ElevenLabs agent is unavailable" }, { status: 502 });
-  }
-}
-
-type RouteContext = { params: Promise<{ path: string[] }> };
-
-export async function GET(request: NextRequest, context: RouteContext) {
-  return proxy(request, context, "GET");
-}
-
-export async function POST(request: NextRequest, context: RouteContext) {
-  return proxy(request, context, "POST");
-}
-
-export async function PUT(request: NextRequest, context: RouteContext) {
-  return proxy(request, context, "PUT");
-}
-
-export async function DELETE(request: NextRequest, context: RouteContext) {
-  return proxy(request, context, "DELETE");
-}
-""",
-}
-
-
 def merge_source(name, current, base, target, scratch):
     if current == target or current == base:
-        return target
-    known = KNOWN_INTERMEDIATE_SERVER_STATE.get(name)
-    if known is not None and current == known:
         return target
     if base is None:
         raise RuntimeError('New route already exists with different contents; refusing overwrite')
@@ -209,15 +75,32 @@ def merge_source(name, current, base, target, scratch):
     return result.stdout
 
 
+# Files this integration owns outright: the server has been proven (twice,
+# on two different files) to carry an out-of-band intermediate version that
+# was never committed, for which git has no valid common ancestor. A 3-way
+# merge against such a `base` either raises a spurious conflict or -- worse
+# -- succeeds "cleanly" while silently dropping real content, because the
+# diverging lines don't happen to textually collide. There is no legitimate
+# reason for the server to hold independent unmerged edits to these
+# specific files that aren't already in this repo's git history, so for
+# these paths this installer always takes `target` outright and never
+# attempts a merge.
+FORCE_TARGET_FILES = {
+    'src/app/dashboard-api/elevenlabs-agent/[...path]/route.ts',
+    'src/lib/elevenlabs-history.ts',
+    'src/app/DashboardClient.tsx',
+    'src/app/DashboardScreen.tsx',
+    'src/lib/audit.ts',
+}
+
+
 def prepare_source(name, current, versions, scratch):
-    # This integration introduces this route even if it is already committed
-    # locally. Local Git tracking does not imply the VPS has deployed it.
-    new_route = 'src/app/dashboard-api/elevenlabs-agent/[...path]/route.ts'
+    if name in FORCE_TARGET_FILES:
+        return versions['target']
     if current is None:
-        if name in (new_route, 'src/lib/elevenlabs-history.ts'):
-            return versions['target']
         if versions['base'] is not None:
             raise RuntimeError('Expected existing source file is missing: ' + name)
+        return versions['target']
     return merge_source(name, current, versions['base'], versions['target'], scratch)
 
 

@@ -19,11 +19,14 @@ export function mapElevenLabsCall(call: ElevenLabsCall) {
   };
 }
 export function mapElevenLabsMessages(call: ElevenLabsCall) {
+  // Only real spoken turns are shown -- tool_calls/tool_results are internal
+  // workflow plumbing (e.g. transfer_to_agent, notify_condition_met), never
+  // meant for a human reader, and must never appear as raw JSON in a
+  // customer-facing transcript.
   return (call.transcript || []).map((turn, index) => ({
     id: `${historyId(call.conversation_id)}:${index}`,
     direction: turn.role === 'user' ? 'inbound' as const : 'outbound' as const,
-    body: [turn.message, turn.tool_calls?.length ? `Tool calls: ${JSON.stringify(turn.tool_calls)}` : '',
-      turn.tool_results?.length ? `Tool results: ${JSON.stringify(turn.tool_results)}` : ''].filter(Boolean).join('\n'),
+    body: turn.message || '',
     media_type: 'text',
     created_at: new Date(((call.metadata?.start_time_unix_secs || 0) + (turn.time_in_call_secs || 0)) * 1000).toISOString(),
   })).filter(turn => turn.body);

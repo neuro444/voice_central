@@ -51,54 +51,33 @@ class InstallerTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 installer.merge_source('some/other/file.ts', 'existing', None, 'new', Path(temp))
 
-    def test_known_intermediate_server_state_reconciled(self):
-        # A prior installer run deployed the 401->502 auth-loop fix for this
-        # route directly to the server without committing that intermediate
-        # version, so git has no common ancestor to 3-way-merge against the
-        # later version that also adds the history routes. This is the
-        # actual real-world incident this reconciliation was built for.
-        name = 'src/app/dashboard-api/elevenlabs-agent/[...path]/route.ts'
-        current = installer.KNOWN_INTERMEDIATE_SERVER_STATE[name]
-        target = current.replace(
-            '  const apiKey = process.env.ELEVENLABS_AGENT_API_KEY;',
-            '  const apiKey = path.startsWith("elevenlabs/")\n'
-            '    ? process.env.ELEVENLABS_CONVERSATIONS_API_KEY\n'
-            '    : process.env.ELEVENLABS_AGENT_API_KEY;',
-        ).replace(
-            '  /^callers$/,\n',
-            '  /^callers$/,\n  /^elevenlabs\\/saved$/,\n',
-        )
-        with tempfile.TemporaryDirectory() as temp:
-            result = installer.merge_source(name, current, 'unrelated-base', target, Path(temp))
-        self.assertEqual(result, target)
+    def test_force_target_files_always_take_target(self):
+        # These files were proven (twice, on two different files) to carry
+        # server-side intermediate versions with no valid git common
+        # ancestor -- a 3-way merge either spuriously conflicts or, worse,
+        # "succeeds" while silently dropping real content, because the
+        # diverging lines don't happen to textually collide. For these
+        # paths, prepare_source must always return target regardless of
+        # whatever unrelated content the server currently has.
+        for name in installer.FORCE_TARGET_FILES:
+            with tempfile.TemporaryDirectory() as temp:
+                result = installer.prepare_source(
+                    name, 'completely unrelated server content\nwith multiple lines\n',
+                    {'base': 'some old base', 'target': 'the correct new content'}, Path(temp),
+                )
+            self.assertEqual(result, 'the correct new content')
 
-    def test_known_intermediate_server_state_does_not_misfire(self):
-        # If the server's file is even slightly different from the exact
-        # known intermediate snapshot, this must NOT silently take target --
-        # it should fall through to the normal merge/conflict path.
-        name = 'src/app/dashboard-api/elevenlabs-agent/[...path]/route.ts'
-        current = installer.KNOWN_INTERMEDIATE_SERVER_STATE[name] + '\n// unexpected extra line'
-        with tempfile.TemporaryDirectory() as temp:
-            with self.assertRaises(RuntimeError):
-                installer.merge_source(name, current, None, 'target', Path(temp))
-
-    def test_committed_new_route_absent_on_server(self):
-        name = 'src/app/dashboard-api/elevenlabs-agent/[...path]/route.ts'
-        with tempfile.TemporaryDirectory() as temp:
-            self.assertEqual(installer.prepare_source(name, None,
-                {'base': 'committed route', 'target': 'updated route'}, Path(temp)), 'updated route')
+    def test_force_target_files_when_absent_on_server(self):
+        for name in installer.FORCE_TARGET_FILES:
+            with tempfile.TemporaryDirectory() as temp:
+                result = installer.prepare_source(name, None, {'base': None, 'target': 'new'}, Path(temp))
+            self.assertEqual(result, 'new')
 
     def test_existing_required_file_missing_still_fails(self):
         with tempfile.TemporaryDirectory() as temp:
             with self.assertRaises(RuntimeError):
-                installer.prepare_source('src/app/DashboardScreen.tsx', None,
+                installer.prepare_source('src/app/dashboard-api/chat-manager/[...path]/route.ts', None,
                     {'base': 'original', 'target': 'updated'}, Path(temp))
-
-    def test_existing_new_route_conflict_still_fails(self):
-        with tempfile.TemporaryDirectory() as temp:
-            with self.assertRaises(RuntimeError):
-                installer.prepare_source('src/app/dashboard-api/elevenlabs-agent/[...path]/route.ts',
-                    'server edit\n', {'base': 'original\n', 'target': 'local edit\n'}, Path(temp))
 
     def test_bundle_is_exact_source_allowlist(self):
         output = packager.build()
