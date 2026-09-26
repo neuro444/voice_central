@@ -525,7 +525,7 @@ function mapChatManagerMessage(m: ChatManagerMessage): Message {
 }
 
   async function loadConversations() {
-    await Promise.allSettled([
+    const results = await Promise.allSettled([
       (async () => {
         const callersRes = await fetch(`${CHAT_MANAGER_API}/callers`);
         if (!callersRes.ok) throw new Error("Chat history unavailable");
@@ -543,6 +543,13 @@ function mapChatManagerMessage(m: ChatManagerMessage): Message {
         conversationSources.current.elevenlabs = calls.map(mapElevenLabsCall);
       })(),
     ]);
+    // Promise.allSettled never rejects, so a real failure here (bad auth,
+    // malformed response, a thrown error inside either branch above) would
+    // otherwise vanish silently -- the affected source just stays whatever
+    // it was last, with no visible sign anything went wrong.
+    const [chatResult, elevenlabsResult] = results;
+    if (chatResult.status === "rejected") console.error("[conversations] chat-manager source failed:", chatResult.reason);
+    if (elevenlabsResult.status === "rejected") console.error("[conversations] elevenlabs source failed:", elevenlabsResult.reason);
     const data = [...conversationSources.current.chat, ...conversationSources.current.elevenlabs]
       .sort((a, b) => Date.parse(b.last_message_at) - Date.parse(a.last_message_at));
     setConversations(data);
