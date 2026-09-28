@@ -11,6 +11,7 @@ const API = process.env.NEXT_PUBLIC_API_URL!;
 const TELEPHONY_API = "/dashboard-api/telephony";
 const CHAT_MANAGER_API = "/dashboard-api/chat-manager";
 const ELEVENLABS_AGENT_API = "/dashboard-api/elevenlabs-agent";
+const SHARED_MENU_API = "/dashboard-api";
 // Print service base URL. Set NEXT_PUBLIC_PRINT_API_URL to switch targets
 // (https://cakeworld.neuroheart.ai on the VPS, http://localhost:7860 locally).
 // If unset, fall back to same-origin so the button posts to /print/order on
@@ -1095,7 +1096,7 @@ function mapChatManagerMessage(m: ChatManagerMessage): Message {
         )}
         {tab === "kanban" && <ManagerKanbanTab api={API} refreshKey={operationsRefreshKey} />}
         {tab === "customers" && <CustomersTab api={TELEPHONY_API} />}
-        {tab === "menu" && <MenuScreen api={TELEPHONY_API} />}
+        {tab === "menu" && <MenuScreen api={SHARED_MENU_API} />}
         {tab === "analytics" && <AnalyticsScreen api={API} refreshKey={operationsRefreshKey} />}
         {tab === "settings" && <SettingsTab restaurant={restaurant} />}
       </main>
