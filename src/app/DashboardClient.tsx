@@ -560,8 +560,12 @@ function mapChatManagerMessage(m: ChatManagerMessage): Message {
     // otherwise vanish silently -- the affected source just stays whatever
     // it was last, with no visible sign anything went wrong.
     const [chatResult, elevenlabsResult] = results;
-    if (chatResult.status === "rejected") console.error("[conversations] chat-manager source failed:", chatResult.reason);
-    if (elevenlabsResult.status === "rejected") console.error("[conversations] elevenlabs source failed:", elevenlabsResult.reason);
+    // These integrations are optional in local development. Keep the last
+    // successful data and report an ordinary warning; console.error triggers
+    // Next.js's full-screen development overlay even though the rejection is
+    // already contained by Promise.allSettled.
+    if (chatResult.status === "rejected") console.warn("[conversations] chat-manager source unavailable:", chatResult.reason);
+    if (elevenlabsResult.status === "rejected") console.warn("[conversations] elevenlabs source unavailable:", elevenlabsResult.reason);
     const data = [...conversationSources.current.chat, ...conversationSources.current.elevenlabs]
       .sort((a, b) => Date.parse(b.last_message_at) - Date.parse(a.last_message_at));
     setConversations(data);
