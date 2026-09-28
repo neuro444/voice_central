@@ -2423,25 +2423,28 @@ body { background: #f7f7f9; color: #281c1a; }
 .agent-plan-active { display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;background:#e8f7ec;color:#16833d;font-size:10px;font-weight:800; }
 .agent-plan-active::before { content:"";width:7px;height:7px;border-radius:50%;background:currentColor; }
 .agent-plan-options { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px; }
-.agent-plan-option { position:relative;min-height:128px;display:grid;grid-template-columns:22px minmax(0,1fr);gap:12px;padding:19px;border:1px solid #decac7;border-radius:14px;background:#fff; }
+.agent-plan-option { position:relative;min-height:128px;display:grid;grid-template-columns:22px minmax(0,1fr);gap:12px;padding:19px;border:1px solid #decac7;border-radius:14px;background:#fff;cursor:pointer;transition:border-color .15s ease,box-shadow .15s ease,background .15s ease; }
+.agent-plan-option:hover { border-color:#cf7770; }
 .agent-plan-option.selected { border-color:#c73732;background:#fff8f7;box-shadow:0 0 0 3px rgba(199,55,50,.09); }
-.agent-plan-option.locked { background:#fafafa;color:#8b7f7c; }
-.agent-plan-status-icon { width:20px;height:20px;display:grid;place-items:center;border-radius:50%;background:#f1e7e5;color:#8c6e69;font-size:11px;font-weight:900; }
-.agent-plan-option.selected .agent-plan-status-icon { background:#c73732;color:#fff; }
+.agent-plan-option input { position:absolute;opacity:0;pointer-events:none; }
+.agent-plan-radio { width:19px;height:19px;display:grid;place-items:center;border:2px solid #c8a9a5;border-radius:50%;background:#fff; }
+.agent-plan-option.selected .agent-plan-radio { border-color:#c73732; }
+.agent-plan-option.selected .agent-plan-radio::after { content:"";width:9px;height:9px;border-radius:50%;background:#c73732; }
 .agent-plan-copy { display:flex;flex-direction:column;gap:7px; }
 .agent-plan-copy strong { color:#281c1a;font-size:15px; }
 .agent-plan-copy small { color:#725d59;font-size:11px;line-height:17px; }
 .agent-plan-option em { grid-column:2;align-self:end;color:#16833d;font-size:10px;font-style:normal;font-weight:800; }
-.agent-plan-option.locked em { color:#8c6e69; }
 .agent-plan-actions { display:flex;align-items:center;justify-content:space-between;gap:18px;margin-top:18px;padding-top:18px;border-top:1px solid #f0dcda; }
 .agent-plan-actions span { color:#725d59;font-size:11px; }
+.agent-plan-actions button { min-width:148px;padding:11px 18px;border:0;border-radius:10px;background:#bd2828;color:#fff;font:inherit;font-size:11px;font-weight:800;cursor:pointer; }
+.agent-plan-actions button:disabled { cursor:not-allowed;opacity:.48; }
 .modal-backdrop{position:fixed;inset:0;z-index:200;display:grid;place-items:center;padding:20px;background:rgba(20,20,22,.65)}.qr-modal{width:min(460px,100%);position:relative;padding:30px;border-radius:18px;background:#fff;text-align:center}.qr-modal h2{margin-bottom:20px}.qr-modal img{width:min(300px,100%);height:auto}.qr-modal p{margin-top:14px;color:#6b514d}.modal-close{position:absolute;right:14px;top:12px;border:0;background:transparent;font-size:28px;cursor:pointer}
 
 @media (max-width: 1050px) {
   .analytics-stat-grid{grid-template-columns:repeat(2,1fr)}.analytics-bottom-grid{grid-template-columns:1fr}.crm-reference-grid{grid-template-columns:1fr}.crm-customer-list{max-height:440px;overflow:auto}.settings-content{grid-template-columns:1fr}.settings-local-nav{display:none}.agent-plan-options{grid-template-columns:1fr}
 }
 @media (max-width: 760px) {
-  :root{--reference-sidebar:72px}.dashboard-sidebar{width:72px;min-width:72px;padding:14px 8px}.cake-world-logo{min-height:58px;margin-bottom:18px;padding:7px}.cake-world-logo-copy,.sidebar-profile>div{display:none}.sidebar-profile{justify-content:center;padding-inline:0}.content,.feature-content,.dashboard-content,.conversations-content,.reference-page{padding:18px}.topbar,.feature-topbar,.dashboard-header,.orders-page-header,.conversations-header{min-height:76px;padding:12px 18px}.orders-content{padding:0 18px 18px}.orders-page-header{margin:0 -18px 18px}.metrics-row,.analytics-stat-grid{grid-template-columns:1fr 1fr}.metric-card{min-height:120px;padding:16px}.metric-value{font-size:25px}.reference-action-row{align-items:stretch;flex-direction:column}.menu-item-row{grid-template-columns:1fr auto;padding-left:22px}.menu-item-row>span{display:none}.crm-stat-grid{grid-template-columns:1fr;padding:18px}.crm-customer-detail>header{align-items:flex-start;flex-wrap:wrap;padding:20px}.crm-customer-detail>header .placeholder-label{margin-left:0}.crm-history-list{padding:0 18px 20px}.crm-history-title{padding:0 18px 14px}.crm-history-list article{grid-template-columns:36px 1fr auto}.crm-history-list article>em{display:none}.settings-profile-grid,.settings-grid{grid-template-columns:1fr}.bar-chart{gap:6px}.conversation-panels{grid-template-columns:1fr}.conversation-log-panel{max-height:420px}.agent-plan-heading,.agent-plan-actions{align-items:stretch;flex-direction:column}
+  :root{--reference-sidebar:72px}.dashboard-sidebar{width:72px;min-width:72px;padding:14px 8px}.cake-world-logo{min-height:58px;margin-bottom:18px;padding:7px}.cake-world-logo-copy,.sidebar-profile>div{display:none}.sidebar-profile{justify-content:center;padding-inline:0}.content,.feature-content,.dashboard-content,.conversations-content,.reference-page{padding:18px}.topbar,.feature-topbar,.dashboard-header,.orders-page-header,.conversations-header{min-height:76px;padding:12px 18px}.orders-content{padding:0 18px 18px}.orders-page-header{margin:0 -18px 18px}.metrics-row,.analytics-stat-grid{grid-template-columns:1fr 1fr}.metric-card{min-height:120px;padding:16px}.metric-value{font-size:25px}.reference-action-row{align-items:stretch;flex-direction:column}.menu-item-row{grid-template-columns:1fr auto;padding-left:22px}.menu-item-row>span{display:none}.crm-stat-grid{grid-template-columns:1fr;padding:18px}.crm-customer-detail>header{align-items:flex-start;flex-wrap:wrap;padding:20px}.crm-customer-detail>header .placeholder-label{margin-left:0}.crm-history-list{padding:0 18px 20px}.crm-history-title{padding:0 18px 14px}.crm-history-list article{grid-template-columns:36px 1fr auto}.crm-history-list article>em{display:none}.settings-profile-grid,.settings-grid{grid-template-columns:1fr}.bar-chart{gap:6px}.conversation-panels{grid-template-columns:1fr}.conversation-log-panel{max-height:420px}.agent-plan-heading,.agent-plan-actions{align-items:stretch;flex-direction:column}.agent-plan-actions button{width:100%}
 }
 @media (max-width: 480px) {.metrics-row,.analytics-stat-grid{grid-template-columns:1fr}.dashboard-header-actions .assistant-online,.orders-assistant-online{display:none}.crm-detail-avatar{width:56px;height:56px;font-size:20px}.crm-customer-detail>header h2{font-size:22px}}
 @media (max-width: 760px) {

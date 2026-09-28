@@ -1150,8 +1150,11 @@ function UnavailableFeatureScreen({
 
 function SettingsTab({ restaurant }: { restaurant: StatusResponse["restaurant"] }) {
   const [planData, setPlanData] = useState<AgentPlanResponse | null>(null);
+  const [selectedPlan, setSelectedPlan] = useState<AgentPlan | null>(null);
   const [loadingPlan, setLoadingPlan] = useState(true);
+  const [savingPlan, setSavingPlan] = useState(false);
   const [planError, setPlanError] = useState("");
+  const [planSuccess, setPlanSuccess] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -1163,6 +1166,7 @@ function SettingsTab({ restaurant }: { restaurant: StatusResponse["restaurant"] 
       .then((data) => {
         if (!active) return;
         setPlanData(data);
+        setSelectedPlan(data.active_plan);
       })
       .catch((error: unknown) => {
         if (active) setPlanError(error instanceof Error ? error.message : "Agent plan could not be loaded.");
@@ -1173,14 +1177,40 @@ function SettingsTab({ restaurant }: { restaurant: StatusResponse["restaurant"] 
     return () => { active = false; };
   }, []);
 
+  async function saveAgentPlan() {
+    if (!planData || !selectedPlan || selectedPlan === planData.active_plan) return;
+    setSavingPlan(true);
+    setPlanError("");
+    setPlanSuccess("");
+    try {
+      const response = await fetch("/dashboard-api/agent-plan", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ active_plan: selectedPlan }),
+      });
+      const data = await response.json().catch(() => ({})) as AgentPlanResponse & { error?: string };
+      if (!response.ok) throw new Error(data.error || `Agent plan could not be saved (${response.status})`);
+      setPlanData(data);
+      setSelectedPlan(data.active_plan);
+      const name = data.options.find((option) => option.id === data.active_plan)?.name || "Agent plan";
+      setPlanSuccess(`${name} is now active for new calls.`);
+    } catch (error) {
+      setPlanError(error instanceof Error ? error.message : "Agent plan could not be saved.");
+    } finally {
+      setSavingPlan(false);
+    }
+  }
+
+  const planChanged = Boolean(planData && selectedPlan && selectedPlan !== planData.active_plan);
+
   return (
     <div className="content feature-content settings-content settings-profile-only">
       <section className="settings-profile-card agent-plan-card">
         <div className="agent-plan-heading">
           <div>
             <span className="settings-eyebrow">Voice assistant</span>
-            <h2>Your agent plan</h2>
-            <p>Your active plan is managed by NeuroHeart. Contact the team to request an upgrade or plan change.</p>
+            <h2>Choose your agent plan</h2>
+            <p>Select the service level for new calls. Voice service providers are managed internally.</p>
           </div>
           {planData && <span className="agent-plan-active">Active</span>}
         </div>
@@ -1190,31 +1220,43 @@ function SettingsTab({ restaurant }: { restaurant: StatusResponse["restaurant"] 
         ) : planError && !planData ? (
           <div className="menu-state-message error" role="alert">{planError}</div>
         ) : (
-          <div className="agent-plan-options" role="list" aria-label="Voice assistant plans">
+          <div className="agent-plan-options" role="radiogroup" aria-label="Voice assistant plan">
             {(planData?.options || []).map((option) => {
+              const checked = selectedPlan === option.id;
               const activePlan = planData?.active_plan === option.id;
               return (
-                <article
-                  className={`agent-plan-option${activePlan ? " selected" : " locked"}`}
-                  key={option.id}
-                  role="listitem"
-                  aria-current={activePlan ? "true" : undefined}
-                >
-                  <span className="agent-plan-status-icon" aria-hidden="true">{activePlan ? "✓" : "🔒"}</span>
+                <label className={`agent-plan-option${checked ? " selected" : ""}`} key={option.id}>
+                  <input
+                    type="radio"
+                    name="agent-plan"
+                    value={option.id}
+                    checked={checked}
+                    disabled={savingPlan}
+                    onChange={() => {
+                      setSelectedPlan(option.id);
+                      setPlanError("");
+                      setPlanSuccess("");
+                    }}
+                  />
+                  <span className="agent-plan-radio" aria-hidden="true" />
                   <span className="agent-plan-copy">
                     <strong>{option.name}</strong>
                     <small>{option.description}</small>
                   </span>
-                  <em>{activePlan ? "Current plan" : "Upgrade required"}</em>
-                </article>
+                  {activePlan && <em>Current plan</em>}
+                </label>
               );
             })}
           </div>
         )}
 
         {planError && planData && <div className="menu-state-message error" role="alert">{planError}</div>}
+        {planSuccess && <div className="menu-state-message success" role="status">{planSuccess}</div>}
         <div className="agent-plan-actions">
-          <span>Plan changes require account approval and cannot be activated from the restaurant dashboard.</span>
+          <span>{planChanged ? "You have an unsaved plan change." : "The current plan is saved for this restaurant."}</span>
+          <button type="button" disabled={!planChanged || savingPlan} onClick={() => void saveAgentPlan()}>
+            {savingPlan ? "Saving…" : "Save agent plan"}
+          </button>
         </div>
       </section>
 
