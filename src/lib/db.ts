@@ -56,6 +56,19 @@ function initSchema(db: DatabaseSync): void {
       PRIMARY KEY (user_id, restaurant_id)
     );
   `);
+
+  // Product-facing plan names deliberately hide the underlying voice vendor.
+  // The server maps the selected plan to a provider; browser responses expose
+  // only "essential" and "premier".
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS restaurant_agent_plans (
+      restaurant_id INTEGER PRIMARY KEY REFERENCES restaurants(id) ON DELETE CASCADE,
+      active_plan TEXT NOT NULL DEFAULT 'essential'
+        CHECK (active_plan IN ('essential', 'premier')),
+      updated_by TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
 }
 
 export function getDb(): DatabaseSync {
