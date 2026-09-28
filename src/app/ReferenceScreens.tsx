@@ -204,7 +204,7 @@ export function MenuScreen({ api }: { api: string }) {
       setCateringSizes(nextCateringSizes);
       setCakePreviews(nextCakePreviews);
     } catch {
-      setError("The pickup menu could not be loaded from the Plivo agent. Please try again.");
+      setError("The shared pickup menu could not be loaded. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -311,7 +311,7 @@ export function MenuScreen({ api }: { api: string }) {
         }
       }));
       await loadMenu();
-      setSuccess("Menu changes saved to the live database and reloaded.");
+      setSuccess("Menu changes saved to the shared database and reloaded.");
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Menu prices could not be saved.");
     } finally {
@@ -720,7 +720,7 @@ export function MenuScreen({ api }: { api: string }) {
         : renderTakeaway()}
       <footer className="menu-unsaved-bar">
         <span className="menu-change-count">{changedItemIds.length} unsaved</span>
-        <p className="menu-unsaved-copy">Saved changes update the live menu database and order validation.</p>
+        <p className="menu-unsaved-copy">Saved changes update the shared restaurant menu database.</p>
         <span className="menu-loaded-count">{activeCount} loaded</span>
         <div className="menu-unsaved-actions">
           <button type="button" disabled={saving || changedItemIds.length === 0} onClick={discard}>Discard</button>

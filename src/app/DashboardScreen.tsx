@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import MetricsRow from "./MetricsRow";
+import { responseArray } from "@/lib/api-shapes";
 
 interface DashboardOrder {
   id: string;
@@ -250,22 +251,22 @@ export default function DashboardScreen({
           fetch(`${api}/api/approvals`),
         ]);
         if (!active) return;
-        const telephonyData: { orders: CompletedOrderRecord[] } = telephonyResponse.ok
-          ? await telephonyResponse.json()
-          : { orders: [] };
-        const chatData: { orders: CompletedOrderRecord[] } = chatResponse.ok
-          ? await chatResponse.json()
-          : { orders: [] };
-        const elevenlabsData: { orders: ElevenLabsOrderRecord[] } = elevenlabsResponse.ok
-          ? await elevenlabsResponse.json()
-          : { orders: [] };
+        const telephonyOrders = telephonyResponse.ok
+          ? responseArray<CompletedOrderRecord>(await telephonyResponse.json(), "orders")
+          : [];
+        const chatOrders = chatResponse.ok
+          ? responseArray<CompletedOrderRecord>(await chatResponse.json(), "orders")
+          : [];
+        const elevenlabsOrdersData = elevenlabsResponse.ok
+          ? responseArray<ElevenLabsOrderRecord>(await elevenlabsResponse.json(), "orders")
+          : [];
         if (telephonyResponse.ok || chatResponse.ok || elevenlabsResponse.ok) {
           const phoneSessionIds = new Set(
-            telephonyData.orders.map((record) => record.session_id).filter(Boolean)
+            telephonyOrders.map((record) => record.session_id).filter(Boolean)
           );
           const merged = [
-            ...telephonyData.orders,
-            ...chatData.orders.filter((record) => !phoneSessionIds.has(record.session_id)),
+            ...telephonyOrders,
+            ...chatOrders.filter((record) => !phoneSessionIds.has(record.session_id)),
           ].sort((a, b) => b.emitted_at.localeCompare(a.emitted_at));
           const numberValue = (value: string | number | undefined) => {
             if (value == null || value === "") return null;
@@ -291,7 +292,7 @@ export default function DashboardScreen({
           // ElevenLabs orders are a distinct call system (own conversation_id,
           // no session_id) -- they never overlap with phone/chat records, so
           // no dedup against phoneSessionIds is needed, just append + re-sort.
-          const mappedElevenLabs = elevenlabsData.orders
+          const mappedElevenLabs = elevenlabsOrdersData
             .map(mapElevenLabsOrderToDashboardOrder)
             .filter((o): o is DashboardOrder => o !== null);
           setOrders(
@@ -300,7 +301,9 @@ export default function DashboardScreen({
             )
           );
         }
-        if (approvalsResponse.ok) setApprovals(await approvalsResponse.json());
+        if (approvalsResponse.ok) {
+          setApprovals(responseArray<DashboardApproval>(await approvalsResponse.json(), "approvals"));
+        }
       } catch {
         // Preserve the last successful view while the backend is temporarily unavailable.
       }

@@ -84,7 +84,7 @@ export async function verifySessionToken(token: string | undefined): Promise<boo
 // the staff username (sub) for audit logging.  Returns null on any failure.
 export async function verifyAndDecodeSessionToken(
   token: string | undefined
-): Promise<{ sub: string; exp: number } | null> {
+): Promise<{ sub: string; exp: number; restaurants: string[] } | null> {
   if (!token) return null;
   const secret = getSecret();
   if (!secret) return null;
@@ -104,8 +104,9 @@ export async function verifyAndDecodeSessionToken(
     const payload = JSON.parse(new TextDecoder().decode(b64urlToBuffer(payloadPart)));
     if (typeof payload.exp !== "number" || payload.exp <= Date.now() / 1000) return null;
     if (typeof payload.sub !== "string") return null;
+    if (!Array.isArray(payload.restaurants) || !payload.restaurants.every((slug: unknown) => typeof slug === "string")) return null;
     if (!userExists(payload.sub)) return null;
-    return { sub: payload.sub, exp: payload.exp };
+    return { sub: payload.sub, exp: payload.exp, restaurants: payload.restaurants };
   } catch {
     return null;
   }

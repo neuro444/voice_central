@@ -56,6 +56,45 @@ function initSchema(db: DatabaseSync): void {
       PRIMARY KEY (user_id, restaurant_id)
     );
   `);
+
+  // Product-facing plan names deliberately hide the underlying voice vendor.
+  // The server maps the selected plan to a provider; browser responses expose
+  // only "essential" and "premier".
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS restaurant_agent_plans (
+      restaurant_id INTEGER PRIMARY KEY REFERENCES restaurants(id) ON DELETE CASCADE,
+      active_plan TEXT NOT NULL DEFAULT 'essential'
+        CHECK (active_plan IN ('essential', 'premier')),
+      updated_by TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+
+  // Voice Central owns the provider-independent menu. The bundled CSV is
+  // only a first-run seed for CakeWorld; once seeded, this table is the
+  // durable source of truth for dashboard edits and agent integrations.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS restaurant_menu_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      restaurant_id INTEGER NOT NULL REFERENCES restaurants(id) ON DELETE CASCADE,
+      name TEXT NOT NULL COLLATE NOCASE,
+      price_cents INTEGER NOT NULL CHECK (price_cents >= 0 AND price_cents <= 9999999),
+      position INTEGER NOT NULL DEFAULT 0,
+      updated_by TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE (restaurant_id, name)
+    );
+  `);
+
+  // A separate marker prevents an intentionally emptied menu from being
+  // repopulated from the seed on the next request.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS restaurant_menu_seed_state (
+      restaurant_id INTEGER PRIMARY KEY REFERENCES restaurants(id) ON DELETE CASCADE,
+      seeded_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
 }
 
 export function getDb(): DatabaseSync {
