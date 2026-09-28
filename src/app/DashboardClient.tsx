@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 import ConversationsScreen from "./ConversationsScreen";
 import DashboardScreen from "./DashboardScreen";
 import { AnalyticsScreen, MenuScreen } from "./ReferenceScreens";
+import { responseArray } from "@/lib/api-shapes";
 const API = process.env.NEXT_PUBLIC_API_URL!;
 const TELEPHONY_API = "/dashboard-api/telephony";
 const CHAT_MANAGER_API = "/dashboard-api/chat-manager";
@@ -569,7 +570,7 @@ function mapChatManagerMessage(m: ChatManagerMessage): Message {
   async function loadApprovals() {
     try {
       const r = await fetch(`${API}/api/approvals`);
-      if (r.ok) setApprovals(await r.json());
+      if (r.ok) setApprovals(responseArray<Approval>(await r.json(), "approvals"));
     } catch { /* retain last successful data during outages */ }
   }
   async function loadMessages(convId: string, phone: string) {
