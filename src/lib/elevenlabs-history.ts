@@ -2,7 +2,7 @@
 export interface ElevenLabsCall {
   conversation_id: string;
   status?: string;
-  metadata?: { start_time_unix_secs?: number; call_duration_secs?: number; phone_call?: { external_number?: string } };
+  metadata?: { start_time_unix_secs?: number; call_duration_secs?: number; phone_call?: { external_number?: string; call_sid?: string } };
   analysis?: { transcript_summary?: string; data_collection?: Record<string, { value?: unknown }>; data_collection_results?: Record<string, { value?: unknown }> };
   transcript?: { role: string; message?: string | null; time_in_call_secs?: number; tool_calls?: unknown[]; tool_results?: unknown[] }[];
 }
@@ -44,6 +44,7 @@ export async function fetchSavedHistory(fetcher: typeof fetch, base: string): Pr
     if (!Number.isInteger(page.next_offset) || page.next_offset <= offset) throw new Error('Invalid history pagination');
     offset = page.next_offset;
   }
+  const knownCarrierSids = new Set(Array.from(calls.values()).map(call => call.metadata?.phone_call?.call_sid).filter(Boolean));
   // Initiation failures have no transcript, but still belong in the staff inbox.
   offset = 0;
   while (true) {
@@ -54,6 +55,12 @@ export async function fetchSavedHistory(fetcher: typeof fetch, base: string): Pr
     for (const event of page.failures) {
       const data = event.data;
       if (!data?.conversation_id || calls.has(data.conversation_id)) continue;
+      const sid = data.metadata?.body?.CallSid || data.metadata?.body?.call_sid;
+      if (event.type === 'carrier_call_unmatched' && knownCarrierSids.has(sid)) continue;
+      if (event.type !== 'carrier_call_unmatched' && sid) {
+        knownCarrierSids.add(sid);
+        calls.delete('twilio_' + sid);
+      }
       calls.set(data.conversation_id, {
         conversation_id: data.conversation_id, status: 'failed',
         metadata: {start_time_unix_secs: event.event_timestamp,
