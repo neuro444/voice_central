@@ -38,11 +38,23 @@ test('spoken turns keep their message even when tool_calls are also present', ()
 test('paginates saved calls and deduplicates IDs', async () => {
   const urls = [];
   const calls = await history.fetchSavedHistory(async url => {
+    if (url.includes('/failures?')) return {ok:true,json:async()=>({failures:[],has_more:false})};
     urls.push(url);
     return {ok:true,json:async()=>urls.length === 1 ? {conversations:[{conversation_id:'a'}],has_more:true,next_offset:100} : {conversations:[{conversation_id:'a'},{conversation_id:'b'}],has_more:false}};
   }, '/proxy');
   assert.equal(calls.length, 2);
   assert.match(urls[1], /offset=100/);
+});
+test('failed connections appear in history without fabricating an order', async () => {
+  const calls = await history.fetchSavedHistory(async url => ({ok:true,json:async()=>url.includes('/failures?')
+    ? {failures:[{event_timestamp:200,data:{conversation_id:'missed',failure_reason:'busy',metadata:{body:{from_number:'+15550001111'}}}}],has_more:false}
+    : {conversations:[],has_more:false}}), '/proxy');
+  assert.equal(calls.length,1);
+  const mapped=history.mapElevenLabsCall(calls[0]);
+  assert.equal(mapped.state,'failed');
+  assert.equal(mapped.phone,'+15550001111');
+  assert.match(mapped.last_message,/busy/);
+  assert.equal(history.mapElevenLabsMessages(calls[0]).length,0);
 });
 test('rejects broken pagination and failed history fetch', async () => {
   await assert.rejects(history.fetchSavedHistory(async()=>({ok:true,json:async()=>({conversations:[],has_more:true,next_offset:0})}), '/proxy'));
@@ -76,4 +88,24 @@ test('history uses its own key and maps upstream 401 to 502', async () => {
   assert.equal(response.status,502);
   assert.equal(calls[0].options.headers['X-API-Key'],'history-key');
   assert.equal(calls[0].url,'http://backend/elevenlabs/saved?page_size=100');
+});
+
+test('late agent transcript replaces unmatched carrier history by exact CallSid', async () => {
+  const sid='CA'+'a'.repeat(32);
+  const calls = await history.fetchSavedHistory(async url => ({ok:true,json:async()=>url.includes('/failures?')
+    ? {failures:[{type:'carrier_call_unmatched',event_timestamp:200,data:{conversation_id:'twilio_'+sid,metadata:{body:{CallSid:sid}}}}],has_more:false}
+    : {conversations:[{conversation_id:'actual',metadata:{phone_call:{call_sid:sid}},transcript:[{role:'user',message:'Hello'}]}],has_more:false}}), '/proxy');
+  assert.equal(calls.length,1);
+  assert.equal(calls[0].conversation_id,'actual');
+});
+
+test('agent failure replaces carrier record regardless of page order', async () => {
+  const sid='CA'+'b'.repeat(32);
+  const carrier={type:'carrier_call_unmatched',event_timestamp:200,data:{conversation_id:'twilio_'+sid,metadata:{body:{CallSid:sid}}}};
+  const agent={type:'call_initiation_failure',event_timestamp:201,data:{conversation_id:'actual',metadata:{body:{CallSid:sid}}}};
+  for (const failures of [[carrier,agent],[agent,carrier]]) {
+    const calls=await history.fetchSavedHistory(async url=>({ok:true,json:async()=>url.includes('/failures?')?{failures,has_more:false}:{conversations:[],has_more:false}}),'/proxy');
+    assert.equal(calls.length,1);
+    assert.equal(calls[0].conversation_id,'actual');
+  }
 });
