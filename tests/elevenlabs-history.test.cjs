@@ -89,3 +89,23 @@ test('history uses its own key and maps upstream 401 to 502', async () => {
   assert.equal(calls[0].options.headers['X-API-Key'],'history-key');
   assert.equal(calls[0].url,'http://backend/elevenlabs/saved?page_size=100');
 });
+
+test('late agent transcript replaces unmatched carrier history by exact CallSid', async () => {
+  const sid='CA'+'a'.repeat(32);
+  const calls = await history.fetchSavedHistory(async url => ({ok:true,json:async()=>url.includes('/failures?')
+    ? {failures:[{type:'carrier_call_unmatched',event_timestamp:200,data:{conversation_id:'twilio_'+sid,metadata:{body:{CallSid:sid}}}}],has_more:false}
+    : {conversations:[{conversation_id:'actual',metadata:{phone_call:{call_sid:sid}},transcript:[{role:'user',message:'Hello'}]}],has_more:false}}), '/proxy');
+  assert.equal(calls.length,1);
+  assert.equal(calls[0].conversation_id,'actual');
+});
+
+test('agent failure replaces carrier record regardless of page order', async () => {
+  const sid='CA'+'b'.repeat(32);
+  const carrier={type:'carrier_call_unmatched',event_timestamp:200,data:{conversation_id:'twilio_'+sid,metadata:{body:{CallSid:sid}}}};
+  const agent={type:'call_initiation_failure',event_timestamp:201,data:{conversation_id:'actual',metadata:{body:{CallSid:sid}}}};
+  for (const failures of [[carrier,agent],[agent,carrier]]) {
+    const calls=await history.fetchSavedHistory(async url=>({ok:true,json:async()=>url.includes('/failures?')?{failures,has_more:false}:{conversations:[],has_more:false}}),'/proxy');
+    assert.equal(calls.length,1);
+    assert.equal(calls[0].conversation_id,'actual');
+  }
+});
