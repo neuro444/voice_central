@@ -14,6 +14,8 @@ const ALLOWED_ROUTES = [
   /^cost\/calls$/,
   /^callers$/,
   /^elevenlabs\/saved$/,
+  /^elevenlabs\/failures$/,
+  /^calls\/incomplete$/,
   /^elevenlabs\/conversations\/[A-Za-z0-9_-]{1,200}$/,
 ];
 

@@ -12,7 +12,7 @@ export function mapElevenLabsCall(call: ElevenLabsCall) {
   const field = (key: string) => typeof fields[key]?.value === 'string' ? fields[key].value as string : '';
   return {
     id: historyId(call.conversation_id), phone: call.metadata?.phone_call?.external_number || field('phone'),
-    name: field('customer_name') || 'Unknown caller', channel: 'phone', state: 'done',
+    name: field('customer_name') || 'Unknown caller', channel: 'phone', state: call.status === 'failed' ? 'failed' : 'done',
     intent: `ElevenLabs · ${call.status || 'unknown'}`,
     last_message: call.analysis?.transcript_summary || call.transcript?.filter(t => t.message).at(-1)?.message || '',
     last_message_at: new Date((call.metadata?.start_time_unix_secs || 0) * 1000).toISOString(),
@@ -42,6 +42,28 @@ export async function fetchSavedHistory(fetcher: typeof fetch, base: string): Pr
     for (const call of page.conversations) calls.set(call.conversation_id, call);
     if (!page.has_more) break;
     if (!Number.isInteger(page.next_offset) || page.next_offset <= offset) throw new Error('Invalid history pagination');
+    offset = page.next_offset;
+  }
+  // Initiation failures have no transcript, but still belong in the staff inbox.
+  offset = 0;
+  while (true) {
+    const response = await fetcher(`${base}/elevenlabs/failures?page_size=100&offset=${offset}`);
+    if (!response.ok) throw new Error('ElevenLabs failed-call history unavailable');
+    const page = await response.json();
+    if (!Array.isArray(page.failures)) throw new Error('Invalid failed-call history response');
+    for (const event of page.failures) {
+      const data = event.data;
+      if (!data?.conversation_id || calls.has(data.conversation_id)) continue;
+      calls.set(data.conversation_id, {
+        conversation_id: data.conversation_id, status: 'failed',
+        metadata: {start_time_unix_secs: event.event_timestamp,
+          phone_call: {external_number: data.metadata?.body?.from_number || data.metadata?.body?.From || ''}},
+        analysis: {transcript_summary: `Call could not connect. ${data.failure_reason || ''}`.trim()},
+        transcript: [],
+      });
+    }
+    if (!page.has_more) break;
+    if (!Number.isInteger(page.next_offset) || page.next_offset <= offset) throw new Error('Invalid failure pagination');
     offset = page.next_offset;
   }
   return Array.from(calls.values());

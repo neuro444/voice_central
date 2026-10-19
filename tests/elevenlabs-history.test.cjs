@@ -38,11 +38,23 @@ test('spoken turns keep their message even when tool_calls are also present', ()
 test('paginates saved calls and deduplicates IDs', async () => {
   const urls = [];
   const calls = await history.fetchSavedHistory(async url => {
+    if (url.includes('/failures?')) return {ok:true,json:async()=>({failures:[],has_more:false})};
     urls.push(url);
     return {ok:true,json:async()=>urls.length === 1 ? {conversations:[{conversation_id:'a'}],has_more:true,next_offset:100} : {conversations:[{conversation_id:'a'},{conversation_id:'b'}],has_more:false}};
   }, '/proxy');
   assert.equal(calls.length, 2);
   assert.match(urls[1], /offset=100/);
+});
+test('failed connections appear in history without fabricating an order', async () => {
+  const calls = await history.fetchSavedHistory(async url => ({ok:true,json:async()=>url.includes('/failures?')
+    ? {failures:[{event_timestamp:200,data:{conversation_id:'missed',failure_reason:'busy',metadata:{body:{from_number:'+15550001111'}}}}],has_more:false}
+    : {conversations:[],has_more:false}}), '/proxy');
+  assert.equal(calls.length,1);
+  const mapped=history.mapElevenLabsCall(calls[0]);
+  assert.equal(mapped.state,'failed');
+  assert.equal(mapped.phone,'+15550001111');
+  assert.match(mapped.last_message,/busy/);
+  assert.equal(history.mapElevenLabsMessages(calls[0]).length,0);
 });
 test('rejects broken pagination and failed history fetch', async () => {
   await assert.rejects(history.fetchSavedHistory(async()=>({ok:true,json:async()=>({conversations:[],has_more:true,next_offset:0})}), '/proxy'));
